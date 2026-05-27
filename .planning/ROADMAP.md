@@ -24,7 +24,13 @@
   3. Agent 在达到步骤预算时自动终止并返回最终答复；在检测到同一工具连续调用 3 次以上时触发干预
   4. 消息结构校验确保 tool_call 和 tool_result 成对出现，孤立 tool_call 被拦截
   5. 每次会话从第一轮开始即生成 JSONL 结构化日志文件，可在文件系统中找到
-**计划**: TBD
+**计划**: 5 plans
+**Plans:**
+- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
+- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
+- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 2: 工具系统与业务验证
 **目标**: 工具注册与执行管线、Bash 安全执行、权限分级、错误分类与重试，以及磁盘清理业务场景的端到端验证
@@ -36,7 +42,13 @@
   3. 执行 `rm`、`dd`、`mkfs` 等危险命令时，agent 暂停执行并等待用户确认后才继续
   4. 工具执行遇到瞬时错误（如 NetworkError）时，系统自动按指数退避 + 随机抖动重试
   5. 磁盘空间诊断与清理全流程跑通：agent 扫描磁盘 -> 定位大文件 -> 分析安全性 -> 请求确认 -> 清理，用户可通过终端交互完成
-**计划**: TBD
+**计划**: 5 plans
+**Plans:**
+- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
+- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
+- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 3: 上下文管理
 **目标**: Token 计数、上下文压缩、追加式存储、溢出文件处理，确保上下文窗口不会无限制膨胀
@@ -47,7 +59,13 @@
   2. 上下文压缩后，旧消息被摘要替代、工具输出被截断、过期历史被移除，LLM 仍能正常运行
   3. 超长工具输出（>80K 字符）自动写入溢出文件而非截断到上下文中，agent 仍可引用
   4. 所有消息操作（包括压缩）均为追加式，不做原地修改，审计轨迹完整可追溯
-**计划**: TBD
+**计划**: 5 plans
+**Plans:**
+- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
+- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
+- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 4: 韧性与恢复
 **目标**: 检查点、循环检测升级、失败注册表、守卫管道、分层恢复、熔断器，确保 agent 运行的可靠性
@@ -59,7 +77,13 @@
   3. 曾经失败的操作被注册到"不再重复"列表，同一会话中 agent 不会再次尝试该操作
   4. Token 预算、成本、速率限制守卫有效拦截越界操作，agent 收到明确守卫违规反馈
   5. 某工具连续失败达到阈值后，熔断器自动暂停该工具；暂停期间 agent 不会收到该工具的调用选项
-**计划**: TBD
+**计划**: 5 plans
+**Plans:**
+- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
+- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
+- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 5: 可观测性与 Web 前端
 **目标**: 事件总线、SSE 实时推流、React Web 前端展示、Token/成本追踪、会话历史浏览，以及完整的交互式演示
@@ -70,7 +94,13 @@
   2. 每次 LLM 调用的 token 消耗和预估成本在前端面板实时展示
   3. 用户可以浏览历史 agent 会话记录，查看过去任意会话的完整步骤
   4. 磁盘清理演示全流程可通过网页交互完成，包括危险操作的确认弹窗和实时状态反馈
-**计划**: TBD
+**计划**: 5 plans
+**Plans:**
+- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
+- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
+- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 **UI 阶段**: 是
 
 ## 进度
