@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from loopai.state_machine.guards import (
+    BudgetGuard,
     LoopDetector,
     MessageValidator,
     ValidationError,
@@ -310,3 +311,132 @@ class TestLoopDetectorEdgeCases:
         sig = LoopDetector._signature("empty_tool", {})
         assert len(sig) == 16
         assert all(c in "0123456789abcdef" for c in sig)
+
+
+# =============================================================================
+# BudgetGuard 测试 (测试 14-21)
+# =============================================================================
+
+
+class TestBudgetGuard:
+    """BudgetGuard 步数预算测试 —— 6 个用例。"""
+
+    def test_step_at_33_percent_no_warning(self) -> None:
+        """步骤在 33% 预算时不触发警告。"""
+        guard = BudgetGuard(max_steps=15, warn_pct=0.80)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        should_continue, modified, action = guard.check(5, messages)
+
+        assert should_continue is True
+        assert action is None
+        # 消息不应被修改（未注入任何系统消息）
+        assert len(modified) == len(messages)
+
+    def test_step_at_80_percent_warn_with_message(self) -> None:
+        """步骤达到 80% 预算时触发警告并注入系统消息。"""
+        guard = BudgetGuard(max_steps=15, warn_pct=0.80)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        should_continue, modified, action = guard.check(12, messages)
+
+        assert should_continue is True
+        assert action == "warn"
+        # 注入了警告消息
+        assert len(modified) == len(messages) + 1
+        assert modified[-1]["role"] == "system"
+        assert "80%" in modified[-1]["content"] or "budget" in modified[-1]["content"].lower()
+
+    def test_step_at_93_percent_still_warn(self) -> None:
+        """步骤在 93% 预算时仍处于警告区域（未达到最终摘要）。"""
+        guard = BudgetGuard(max_steps=15, warn_pct=0.80)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        should_continue, modified, action = guard.check(14, messages)
+
+        assert should_continue is True
+        assert action == "warn"
+        assert len(modified) == len(messages) + 1
+        assert modified[-1]["role"] == "system"
+
+    def test_step_equal_max_final_summary(self) -> None:
+        """步骤恰好等于 max_steps 时触发最终摘要。"""
+        guard = BudgetGuard(max_steps=15, warn_pct=0.80)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        should_continue, modified, action = guard.check(15, messages)
+
+        assert should_continue is True
+        assert action == "final"
+        # 注入了最终摘要提示
+        assert len(modified) == len(messages) + 1
+        assert modified[-1]["role"] == "system"
+        assert "exhausted" in modified[-1]["content"].lower() or "final" in modified[-1]["content"].lower()
+
+    def test_step_exceeds_max_final(self) -> None:
+        """步骤超过 max_steps 时仍然触发最终摘要。"""
+        guard = BudgetGuard(max_steps=15, warn_pct=0.80)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        should_continue, modified, action = guard.check(16, messages)
+
+        assert should_continue is True
+        assert action == "final"
+        assert len(modified) == len(messages) + 1
+
+    def test_custom_warn_threshold(self) -> None:
+        """自定义 warn_pct 阈值按预期工作。"""
+        guard = BudgetGuard(max_steps=10, warn_pct=0.50)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        # 在 50% 阈值以下不触发
+        should_continue, modified, action = guard.check(4, messages)
+        assert should_continue is True
+        assert action is None
+
+        # 在 50% 阈值触发警告
+        should_continue, modified, action = guard.check(5, messages)
+        assert should_continue is True
+        assert action == "warn"
+        assert len(modified) == len(messages) + 1
+
+    def test_input_messages_not_mutated(self) -> None:
+        """check() 不原地修改输入消息列表。"""
+        guard = BudgetGuard(max_steps=15, warn_pct=0.80)
+        messages = [{"role": "user", "content": "Hello"}]
+        original_len = len(messages)
+
+        _, modified, _ = guard.check(12, messages)
+
+        # 输入列表未被修改
+        assert len(messages) == original_len
+        # 返回的是新列表
+        assert modified is not messages
+        assert len(modified) == original_len + 1
+
+
+class TestBudgetGuardUnreachable:
+    """BudgetGuard 不可达检测测试 —— 2 个用例。"""
+
+    def test_unreachable_three_failures(self) -> None:
+        """连续 3 次失败触发不可达信号。"""
+        guard = BudgetGuard(max_steps=15)
+
+        # 2 次失败不触发
+        assert guard.check_unreachable(True) is None
+        assert guard.check_unreachable(True) is None
+
+        # 第 3 次失败触发
+        assert guard.check_unreachable(True) == "unreachable"
+
+    def test_unreachable_below_threshold(self) -> None:
+        """连续失败少于 3 次不触发不可达信号。"""
+        guard = BudgetGuard(max_steps=15)
+
+        assert guard.check_unreachable(True) is None
+        assert guard.check_unreachable(True) is None
+
+        # 成功重置计数
+        assert guard.check_unreachable(False) is None
+        # 重新计数
+        assert guard.check_unreachable(True) is None
