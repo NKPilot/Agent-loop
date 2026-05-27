@@ -20,20 +20,20 @@ def test_tool_result_success():
     assert result.is_error is False
     assert result.data == "hello"
     assert result.duration_ms == 1.5
-    assert result.error is None
+    assert result.error_message is None
 
 
 # ── Test 2: ToolResult error construction ─────────────────────────────
 
 
 def test_tool_result_error():
-    """ToolResult.error() sets status='error', is_error=True, error accessible."""
+    """ToolResult.error() sets status='error', is_error=True, error_message accessible."""
     from loopai.tools.types import ToolResult
 
     result = ToolResult.error(error_msg="something failed", duration_ms=0.5)
     assert result.status == "error"
     assert result.is_error is True
-    assert result.error == "something failed"
+    assert result.error_message == "something failed"
     assert result.duration_ms == 0.5
     assert result.data is None
 
