@@ -28,8 +28,8 @@
 **Plans:**
 - [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
 - [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
-- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
-- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
+- [x] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
+- [x] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
 - [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 2: 工具系统与业务验证
@@ -46,8 +46,8 @@
 **Plans:**
 - [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
 - [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
-- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
-- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
+- [x] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
+- [x] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
 - [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 3: 上下文管理
@@ -61,8 +61,8 @@
   4. 所有消息操作（包括压缩）均为追加式，不做原地修改，审计轨迹完整可追溯
 **计划**: 5 plans
 **Plans:**
-- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
-- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
 - [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
 - [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
 - [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
@@ -79,8 +79,8 @@
   5. 某工具连续失败达到阈值后，熔断器自动暂停该工具；暂停期间 agent 不会收到该工具的调用选项
 **计划**: 5 plans
 **Plans:**
-- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
-- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
 - [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
 - [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
 - [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
