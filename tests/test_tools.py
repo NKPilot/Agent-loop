@@ -342,3 +342,292 @@ def test_tool_registry_get_schemas():
     assert "parameters" in schema["function"]
     params = schema["function"]["parameters"]
     assert params["type"] == "object"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Task 3: ToolExecutor + error classification + retry
+# ═══════════════════════════════════════════════════════════════════════
+
+
+# ── Test 14: Executor runs sync tool successfully ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_sync_tool_success():
+    """ToolExecutor.execute() on a sync tool returns ToolResult.success()."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+
+    registry = ToolRegistry()
+
+    @tool(name="greet")
+    def greet(name: str) -> str:
+        """Greet someone."""
+        return f"Hello, {name}!"
+
+    registry.register(greet)
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute("greet", {"name": "World"})
+    assert result.status == "success"
+    assert result.is_error is False
+    assert result.data == "Hello, World!"
+    assert result.duration_ms > 0
+
+
+# ── Test 15: Executor runs async tool successfully ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_async_tool_success():
+    """ToolExecutor.execute() on an async tool returns ToolResult.success()."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+
+    registry = ToolRegistry()
+
+    @tool(name="async_greet")
+    async def async_greet(name: str) -> str:
+        """Greet asynchronously."""
+        return f"Hi, {name}!"
+
+    registry.register(async_greet)
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute("async_greet", {"name": "AsyncWorld"})
+    assert result.status == "success"
+    assert result.is_error is False
+    assert result.data == "Hi, AsyncWorld!"
+    assert result.duration_ms > 0
+
+
+# ── Test 16: Executor handles tool timeout ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_tool_timeout():
+    """Tool that exceeds timeout returns ToolResult.error() with timeout info."""
+    import asyncio
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+
+    registry = ToolRegistry()
+
+    @tool(name="slow_tool", timeout=0.1)
+    async def slow_tool() -> str:
+        """A very slow tool."""
+        await asyncio.sleep(10.0)
+        return "done"
+
+    registry.register(slow_tool)
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute("slow_tool", {})
+    assert result.status == "error"
+    assert result.is_error is True
+
+
+# ── Test 17: Executor handles parameter validation failure ────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_parameter_validation_failure():
+    """Invalid args to executor result in ToolResult.error(), no retry."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+
+    registry = ToolRegistry()
+
+    call_count = 0
+
+    @tool(name="validated_tool")
+    def validated_tool(x: int) -> int:
+        """Requires an int."""
+        nonlocal call_count
+        call_count += 1
+        return x * 2
+
+    registry.register(validated_tool)
+    executor = ToolExecutor(registry)
+
+    # Pass string instead of int
+    result = await executor.execute("validated_tool", {"x": "not_an_int"})
+    assert result.status == "error"
+    assert result.is_error is True
+    # Function body should NOT have been called (validation fails first)
+    assert call_count == 0
+
+
+# ── Test 18: classify_error — TRANSIENT ───────────────────────────────
+
+
+def test_classify_error_transient():
+    """TimeoutError, ConnectionError classified as TRANSIENT (D-11)."""
+    from loopai.tools.errors import classify_error, GuardViolationError
+    from loopai.tools.types import ErrorCategory
+
+    assert classify_error(TimeoutError("timed out")) == ErrorCategory.TRANSIENT
+    assert classify_error(ConnectionError("refused")) == ErrorCategory.TRANSIENT
+
+
+# ── Test 19: classify_error — TOOL_EXECUTION ──────────────────────────
+
+
+def test_classify_error_tool_execution():
+    """ValueError, TypeError classified as TOOL_EXECUTION."""
+    from loopai.tools.errors import classify_error
+    from loopai.tools.types import ErrorCategory
+
+    assert classify_error(ValueError("bad value")) == ErrorCategory.TOOL_EXECUTION
+    assert classify_error(TypeError("bad type")) == ErrorCategory.TOOL_EXECUTION
+    assert classify_error(RuntimeError("something went wrong")) == ErrorCategory.TOOL_EXECUTION
+
+
+# ── Test 20: classify_error — GUARD_VIOLATION ─────────────────────────
+
+
+def test_classify_error_guard_violation():
+    """PermissionError, GuardViolationError classified as GUARD_VIOLATION."""
+    from loopai.tools.errors import classify_error, GuardViolationError
+    from loopai.tools.types import ErrorCategory
+
+    assert classify_error(PermissionError("denied")) == ErrorCategory.GUARD_VIOLATION
+    assert classify_error(GuardViolationError("guard blocked")) == ErrorCategory.GUARD_VIOLATION
+
+
+# ── Test 21: classify_error — FATAL ───────────────────────────────────
+
+
+def test_classify_error_fatal():
+    """MemoryError, SystemExit classified as FATAL."""
+    from loopai.tools.errors import classify_error
+    from loopai.tools.types import ErrorCategory
+
+    assert classify_error(MemoryError("out of memory")) == ErrorCategory.FATAL
+    assert classify_error(SystemExit(1)) == ErrorCategory.FATAL
+
+
+# ── Test 22: Retry on transient error with backoff ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_retry_on_transient():
+    """TransientError triggers retry with exponential backoff (D-12, D-13)."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+    from loopai.tools.types import RetryConfig
+
+    registry = ToolRegistry()
+    call_count = 0
+
+    @tool(name="flaky", retry=RetryConfig(max_attempts=3, base_delay=0.01, max_delay=0.5))
+    def flaky_tool() -> str:
+        """Fails first two times."""
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise TimeoutError("transient failure")
+        return "success on attempt 3"
+
+    registry.register(flaky_tool)
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute("flaky", {})
+    assert result.status == "success"
+    assert result.data == "success on attempt 3"
+    assert call_count == 3  # 2 failures + 1 success = 3 calls
+
+
+# ── Test 23: No retry on TOOL_EXECUTION error ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_no_retry_on_tool_execution_error():
+    """TOOL_EXECUTION errors do NOT trigger retry (D-13)."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+    from loopai.tools.types import RetryConfig
+
+    registry = ToolRegistry()
+    call_count = 0
+
+    @tool(name="bad_tool", retry=RetryConfig(max_attempts=3, base_delay=0.01, max_delay=0.5))
+    def bad_tool() -> str:
+        """Always raises ValueError."""
+        nonlocal call_count
+        call_count += 1
+        raise ValueError("always fails")
+
+    registry.register(bad_tool)
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute("bad_tool", {})
+    assert result.status == "error"
+    assert result.is_error is True
+    # Should only be called once — no retry for TOOL_EXECUTION
+    assert call_count == 1
+
+
+# ── Test 24: No retry on GUARD_VIOLATION error ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_no_retry_on_guard_violation():
+    """GUARD_VIOLATION errors do NOT trigger retry (D-13)."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+    from loopai.tools.types import RetryConfig
+
+    registry = ToolRegistry()
+    call_count = 0
+
+    @tool(name="forbidden", retry=RetryConfig(max_attempts=3, base_delay=0.01, max_delay=0.5))
+    def forbidden_tool() -> str:
+        """Always denied."""
+        nonlocal call_count
+        call_count += 1
+        raise PermissionError("access denied")
+
+    registry.register(forbidden_tool)
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute("forbidden", {})
+    assert result.status == "error"
+    assert result.is_error is True
+    # Should only be called once — no retry for GUARD_VIOLATION
+    assert call_count == 1
+
+
+# ── Test 25: FatalError re-raises directly ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_executor_fatal_error_reraises():
+    """FatalError is re-raised directly, not wrapped in ToolResult (D-13)."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+    from loopai.tools.types import RetryConfig
+    from loopai.tools.errors import GuardViolationError
+
+    registry = ToolRegistry()
+
+    @tool(name="oom")
+    def oom_tool() -> str:
+        """Simulates OOM."""
+        # We cannot actually raise MemoryError reliably (Python might handle it),
+        # so we use SystemExit which is also FATAL per D-11.
+        raise SystemExit(1)
+
+    registry.register(oom_tool)
+    executor = ToolExecutor(registry)
+
+    with pytest.raises(SystemExit):
+        await executor.execute("oom", {})
