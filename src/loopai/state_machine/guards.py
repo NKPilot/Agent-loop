@@ -146,7 +146,7 @@ class MessageValidator:
                 tool_calls = msg.get("tool_calls")
                 if tool_calls:
                     for tc in tool_calls:
-                        tc_id = tc.get("id", "")
+                        tc_id = tc.get("id", "") or tc.get("tool_call_id", "")
                         if tc_id:
                             pending_ids.add(tc_id)
 
