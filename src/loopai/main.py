@@ -101,7 +101,7 @@ async def run_session(
 
     # ── Start consumers ──────────────────────────────────────────────
     logger = JSONLLogger(session.session_id)
-    renderer = CLIAgentRenderer(bus)
+    renderer = CLIAgentRenderer(bus, permission_guard=permission_guard)
 
     logger_task = await logger.start(bus)
     renderer_task = asyncio.create_task(renderer.run(max_steps=actual_max))
