@@ -272,7 +272,7 @@ class TestLLMClient:
     @pytest.mark.asyncio
     async def test_client_configuration(self, config, bus):
         """Verify AsyncOpenAI is created with the correct parameters from AgentConfig."""
-        with patch("openai.AsyncOpenAI", autospec=True) as mock_client_cls:
+        with patch("loopai.llm.client.AsyncOpenAI") as mock_client_cls:
             from loopai.llm.client import LLMClient
 
             client = LLMClient(config=config, bus=bus)
@@ -297,9 +297,10 @@ class TestLLMClient:
 
         from loopai.llm.client import LLMClient
 
-        with patch("openai.AsyncOpenAI", autospec=True) as mock_cls:
-            mock_instance = mock_cls.return_value
+        with patch("loopai.llm.client.AsyncOpenAI") as mock_cls:
+            mock_instance = MagicMock()
             mock_instance.beta.chat.completions.stream.return_value = mock_stream
+            mock_cls.return_value = mock_instance
 
             client = LLMClient(config=config, bus=bus)
             result = await client.complete(
@@ -351,9 +352,10 @@ class TestLLMClient:
 
         from loopai.llm.client import LLMClient
 
-        with patch("openai.AsyncOpenAI", autospec=True) as mock_cls:
-            mock_instance = mock_cls.return_value
+        with patch("loopai.llm.client.AsyncOpenAI") as mock_cls:
+            mock_instance = MagicMock()
             mock_instance.beta.chat.completions.stream.return_value = mock_stream
+            mock_cls.return_value = mock_instance
 
             client = LLMClient(config=config, bus=bus)
             result = await client.complete(
@@ -405,9 +407,10 @@ class TestLLMClient:
 
         from loopai.llm.client import LLMClient
 
-        with patch("openai.AsyncOpenAI", autospec=True) as mock_cls:
-            mock_instance = mock_cls.return_value
+        with patch("loopai.llm.client.AsyncOpenAI") as mock_cls:
+            mock_instance = MagicMock()
             mock_instance.beta.chat.completions.stream.return_value = mock_stream
+            mock_cls.return_value = mock_instance
 
             client = LLMClient(config=config, bus=bus)
             result = await client.complete(
@@ -449,9 +452,10 @@ class TestLLMClient:
 
         from loopai.llm.client import LLMClient
 
-        with patch("openai.AsyncOpenAI", autospec=True) as mock_cls:
-            mock_instance = mock_cls.return_value
+        with patch("loopai.llm.client.AsyncOpenAI") as mock_cls:
+            mock_instance = MagicMock()
             mock_instance.beta.chat.completions.stream.return_value = mock_stream
+            mock_cls.return_value = mock_instance
 
             client = LLMClient(config=config, bus=bus)
             with pytest.raises(RuntimeError, match="API connection failed"):
@@ -483,9 +487,10 @@ class TestLLMClient:
 
         from loopai.llm.client import LLMClient
 
-        with patch("openai.AsyncOpenAI", autospec=True) as mock_cls:
-            mock_instance = mock_cls.return_value
+        with patch("loopai.llm.client.AsyncOpenAI") as mock_cls:
+            mock_instance = MagicMock()
             mock_instance.beta.chat.completions.stream.return_value = mock_stream
+            mock_cls.return_value = mock_instance
 
             client = LLMClient(config=config, bus=bus)
             result = await client.complete(
@@ -527,9 +532,10 @@ class TestLLMClient:
 
         from loopai.llm.client import LLMClient
 
-        with patch("openai.AsyncOpenAI", autospec=True) as mock_cls:
-            mock_instance = mock_cls.return_value
+        with patch("loopai.llm.client.AsyncOpenAI") as mock_cls:
+            mock_instance = MagicMock()
             mock_instance.beta.chat.completions.stream.return_value = mock_stream
+            mock_cls.return_value = mock_instance
 
             client = LLMClient(config=config, bus=bus)
             result = await client.complete(
