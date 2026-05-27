@@ -1,0 +1,34 @@
+[project]
+name = "loopai"
+version = "0.1.0"
+description = "AI Agent framework with ReAct loop, Event Bus, and observability"
+requires-python = ">=3.12"
+dependencies = [
+    "openai==2.38.0",
+    "pydantic==2.13.4",
+    "rich==15.0.0",
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-timeout",
+    "ruff",
+    "mypy",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+timeout = 10
+addopts = "-v"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
