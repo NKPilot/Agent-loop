@@ -8,9 +8,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections import deque
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from loopai.events.bus import EventBus
+    from loopai.tools.types import PermissionLevel as PermissionLevelType
 
 
 class ValidationError(ValueError):
@@ -256,3 +263,174 @@ class BudgetGuard:
         if self._consecutive_failures >= 3:
             return "unreachable"
         return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PermissionGuard — dangerous command confirmation via EventBus (D-08, D-09)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class PermissionGuard:
+    """Permission guard — checks tool permission level before execution.
+
+    SAFE and MODERATE commands are allowed immediately.  DANGEROUS commands
+    trigger a ``confirmation_required`` event on the :class:`EventBus` and
+    block until the user responds (via :meth:`respond`) or the confirmation
+    timeout expires.
+
+    Decision references:
+        D-08: Whitelist/blacklist classification with dangerous escalation
+        D-09: Event-driven confirmation pause (EventBus + CLI/frontend consumer)
+
+    Attributes:
+        confirmation_timeout: Seconds to wait for user response (default 120 s).
+
+    Example::
+
+        from loopai.events.bus import EventBus
+        from loopai.state_machine.guards import PermissionGuard
+        from loopai.tools.types import PermissionLevel
+
+        bus = EventBus()
+        guard = PermissionGuard(bus, confirmation_timeout=120.0)
+
+        # In the agent loop (async context):
+        should_proceed, action = await guard.check(
+            tool_name="bash.rm",
+            tool_args={"path": "/tmp/file"},
+            permission_level=PermissionLevel.DANGEROUS,
+            session_id="sess-1",
+            step_num=3,
+        )
+
+        # In the CLI consumer (sync context):
+        guard.respond("sess-1_bash.rm_3", approved=True)
+    """
+
+    def __init__(
+        self,
+        bus: EventBus,
+        confirmation_timeout: float = 120.0,
+    ) -> None:
+        self._bus: EventBus = bus
+        self.confirmation_timeout = confirmation_timeout
+
+        #: Map confirmation_id -> asyncio.Event for blocking wait.
+        self._pending: dict[str, asyncio.Event] = {}
+
+        #: Map confirmation_id -> bool (user's approve/deny decision).
+        self._results: dict[str, bool] = {}
+
+    # ── Public API ──────────────────────────────────────────────────────
+
+    async def check(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        permission_level: PermissionLevelType,
+        session_id: str,
+        step_num: int,
+    ) -> tuple[bool, str]:
+        """Check whether this tool call should proceed.
+
+        Args:
+            tool_name: The tool's registered name (e.g. ``"bash.rm"``).
+            tool_args: The tool's argument dict.
+            permission_level: Pre-classified :class:`PermissionLevel`.
+            session_id: The current agent session identifier.
+            step_num: The current agent step number.
+
+        Returns:
+            A ``(should_proceed, action)`` tuple:
+                - ``(True, "allow")`` — SAFE or MODERATE, or DANGEROUS with user approval.
+                - ``(False, "confirm_required")`` — DANGEROUS, event published, awaiting response.
+                - ``(False, "user_denied")`` — User explicitly denied the operation.
+                - ``(False, "timeout")`` — No response received within timeout.
+        """
+        from loopai.tools.types import PermissionLevel
+
+        # SAFE and MODERATE commands pass through immediately.
+        if permission_level in (PermissionLevel.SAFE, PermissionLevel.MODERATE):
+            return (True, "allow")
+
+        # DANGEROUS — require user confirmation.
+        confirmation_id = f"{session_id}_{tool_name}_{step_num}"
+
+        # Publish confirmation_required event for CLI/frontend consumers.
+        await self._bus.publish(
+            "confirmation_required",
+            {
+                "event_type": "confirmation_required",
+                "session_id": session_id,
+                "step_num": step_num,
+                "confirmation_id": confirmation_id,
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "permission_level": permission_level.value,
+                "reason": f"危险命令 {tool_name} 需要用户确认",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        # Create a blocking event and wait for respond() or timeout.
+        event = asyncio.Event()
+        self._pending[confirmation_id] = event
+
+        try:
+            await asyncio.wait_for(
+                event.wait(), timeout=self.confirmation_timeout
+            )
+        except asyncio.TimeoutError:
+            # Clean up and publish timeout event.
+            self._pending.pop(confirmation_id, None)
+            self._results.pop(confirmation_id, None)
+
+            await self._bus.publish(
+                "confirmation_timeout",
+                {
+                    "event_type": "confirmation_timeout",
+                    "session_id": session_id,
+                    "step_num": step_num,
+                    "confirmation_id": confirmation_id,
+                    "tool_name": tool_name,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            return (False, "timeout")
+
+        # Retrieve and clean up the user's decision.
+        approved = self._results.pop(confirmation_id, False)
+        self._pending.pop(confirmation_id, None)
+
+        # Publish the response event for audit trail.
+        await self._bus.publish(
+            "confirmation_response",
+            {
+                "event_type": "confirmation_response",
+                "session_id": session_id,
+                "step_num": step_num,
+                "confirmation_id": confirmation_id,
+                "tool_name": tool_name,
+                "approved": approved,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        if approved:
+            return (True, "allow")
+        return (False, "user_denied")
+
+    def respond(self, confirmation_id: str, approved: bool) -> None:
+        """Respond to a pending confirmation request.
+
+        Called by the CLI consumer (or any external agent) to approve or
+        deny a DANGEROUS command.  This is a synchronous method — it stores
+        the result and signals the waiting coroutine.
+
+        Args:
+            confirmation_id: The confirmation ID from the event payload.
+            approved: ``True`` to allow execution, ``False`` to deny.
+        """
+        self._results[confirmation_id] = approved
+        if confirmation_id in self._pending:
+            self._pending[confirmation_id].set()
