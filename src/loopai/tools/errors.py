@@ -25,7 +25,6 @@ Mapping rules:
 from __future__ import annotations
 
 import asyncio
-from typing import get_type_hints
 
 from loopai.tools.types import ErrorCategory
 

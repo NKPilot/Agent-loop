@@ -134,8 +134,12 @@ class ToolExecutor:
 
                 if category == ErrorCategory.TRANSIENT:
                     # D-13: Transient errors — retry with backoff
+                    msg = (
+                        f"Transient error "
+                        f"(attempt {attempt + 1}/{retry_config.max_attempts}): {exc}"
+                    )
                     last_result = ToolResult.error(
-                        error_msg=f"Transient error (attempt {attempt + 1}/{retry_config.max_attempts}): {exc}",
+                        error_msg=msg,
                         duration_ms=0.0,
                     )
                     # Don't sleep on the last attempt
@@ -195,11 +199,11 @@ class ToolExecutor:
         # Apply timeout (D-07)
         try:
             raw_result = await asyncio.wait_for(coro, timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # asyncio.TimeoutError is a TRANSIENT category — re-raise
             # so the retry loop can handle it
             duration_ms = (time.monotonic() - start) * 1000
-            raise asyncio.TimeoutError(
+            raise TimeoutError(
                 f"Tool '{metadata.name}' timed out after {timeout}s"
             )
 

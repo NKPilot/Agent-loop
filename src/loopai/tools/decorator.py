@@ -27,9 +27,10 @@ from __future__ import annotations
 import inspect
 import types
 import typing
+from collections.abc import Callable
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Optional, Union, get_args, get_origin
+from typing import Any, Optional, Union, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError, create_model
 
@@ -127,14 +128,6 @@ def _build_param_schema(func: Callable) -> dict:
 
     if not fields:
         return {"type": "object", "properties": {}, "required": []}
-
-    # Create a Pydantic model and extract its JSON Schema
-    validation_model = create_model(
-        f"_{func.__name__}_Params",
-        __base__=BaseModel,
-        **fields,
-    )
-    pydantic_schema = validation_model.model_json_schema()
 
     # Build properties using our type mapping for consistency
     properties: dict = {}
