@@ -42,13 +42,12 @@
   3. 执行 `rm`、`dd`、`mkfs` 等危险命令时，agent 暂停执行并等待用户确认后才继续
   4. 工具执行遇到瞬时错误（如 NetworkError）时，系统自动按指数退避 + 随机抖动重试
   5. 磁盘空间诊断与清理全流程跑通：agent 扫描磁盘 -> 定位大文件 -> 分析安全性 -> 请求确认 -> 清理，用户可通过终端交互完成
-**计划**: 5 plans
+**计划**: 4 plans
 **Plans:**
-- [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
-- [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
-- [x] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
-- [x] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
-- [x] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
+- [ ] 02-01-PLAN.md — 工具系统基础：类型定义、@tool 装饰器（自动 Schema 生成）、ToolRegistry、执行管线（含错误分类+重试）
+- [ ] 02-02-PLAN.md — Bash 工具与权限系统：命令分类器（白名单/黑名单+路径感知）、BashTool（安全 subprocess）、PermissionGuard
+- [ ] 02-03-PLAN.md — FSM 集成与 CLI 确认：事件 Schema 扩展、ReActFSM 重构（真实工具管线）、CLI 确认交互
+- [ ] 02-04-PLAN.md — 磁盘清理业务验证：4 磁盘工具注册、预设沙箱场景、端到端流程测试
 
 ### 阶段 3: 上下文管理
 **目标**: Token 计数、上下文压缩、追加式存储、溢出文件处理，确保上下文窗口不会无限制膨胀
