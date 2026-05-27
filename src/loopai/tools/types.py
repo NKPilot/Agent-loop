@@ -185,6 +185,7 @@ class ToolMetadata(BaseModel):
     tags: list[str] = []
     param_schema: dict = {}
     func_ref: Any = Field(default=None, exclude=True)
+    validation_model: Any = Field(default=None, exclude=True)
 
     model_config = {"arbitrary_types_allowed": True}
 

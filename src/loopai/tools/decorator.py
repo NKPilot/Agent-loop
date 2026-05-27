@@ -248,6 +248,7 @@ def tool(
             tags=list(tags),
             param_schema=param_schema,
             func_ref=func,
+            validation_model=validation_model,
         )
 
         # Build a mapping from parameter name to position index
