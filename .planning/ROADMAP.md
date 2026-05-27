@@ -26,8 +26,8 @@
   5. 每次会话从第一轮开始即生成 JSONL 结构化日志文件，可在文件系统中找到
 **计划**: 5 plans
 **Plans:**
-- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
-- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
 - [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
 - [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
 - [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
@@ -44,8 +44,8 @@
   5. 磁盘空间诊断与清理全流程跑通：agent 扫描磁盘 -> 定位大文件 -> 分析安全性 -> 请求确认 -> 清理，用户可通过终端交互完成
 **计划**: 5 plans
 **Plans:**
-- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
-- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
 - [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
 - [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
 - [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
