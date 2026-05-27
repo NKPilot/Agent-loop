@@ -146,6 +146,40 @@ class Error(EventBase):
     traceback: str | None = None
 
 
+# ── Confirmation events (Phase 2, D-09) ───────────────────────────────
+
+
+class ConfirmationRequired(EventBase):
+    """Dangerous command confirmation request — published by PermissionGuard via EventBus.
+
+    Decision D-09: Event-driven confirmation pause. The Agent loop pauses in the
+    ACT state while waiting for user response (y/n) to a confirmation_required event.
+    The CLI consumer (or Phase 5 web dashboard) displays the command details and
+    collects the user's decision.
+    """
+
+    event_type: Literal["confirmation_required"] = "confirmation_required"
+    step_num: int
+    confirmation_id: str
+    tool_name: str
+    tool_args: dict
+    permission_level: str  # "dangerous" — matching PermissionLevel.DANGEROUS.value
+    reason: str  # Human-readable (Chinese) explanation, e.g. "命中黑名单命令 rm"
+
+
+class ConfirmationResponse(EventBase):
+    """User response to a confirmation request — published by the CLI consumer.
+
+    The PermissionGuard.wait() coroutine is unblocked when this event is published.
+    The ``approved`` field carries the user's y/n decision.
+    """
+
+    event_type: Literal["confirmation_response"] = "confirmation_response"
+    step_num: int
+    confirmation_id: str
+    approved: bool
+
+
 # ── Discriminated union type ────────────────────────────────────────
 
 Event = Annotated[
@@ -161,6 +195,8 @@ Event = Annotated[
     | BudgetWarning
     | BudgetExhausted
     | LoopDetected
-    | Error,
+    | Error
+    | ConfirmationRequired
+    | ConfirmationResponse,
     Field(discriminator="event_type"),
 ]
