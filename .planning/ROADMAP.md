@@ -30,7 +30,7 @@
 - [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
 - [x] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
 - [x] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
-- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
+- [x] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 2: 工具系统与业务验证
 **目标**: 工具注册与执行管线、Bash 安全执行、权限分级、错误分类与重试，以及磁盘清理业务场景的端到端验证
@@ -48,7 +48,7 @@
 - [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
 - [x] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
 - [x] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
-- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
+- [x] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 3: 上下文管理
 **目标**: Token 计数、上下文压缩、追加式存储、溢出文件处理，确保上下文窗口不会无限制膨胀
@@ -63,8 +63,8 @@
 **Plans:**
 - [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
 - [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
-- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
-- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
+- [x] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
+- [x] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
 - [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 4: 韧性与恢复
@@ -81,8 +81,8 @@
 **Plans:**
 - [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
 - [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
-- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
-- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
+- [x] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
+- [x] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
 - [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
 
 ### 阶段 5: 可观测性与 Web 前端
@@ -96,8 +96,8 @@
   4. 磁盘清理演示全流程可通过网页交互完成，包括危险操作的确认弹窗和实时状态反馈
 **计划**: 5 plans
 **Plans:**
-- [ ] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
-- [ ] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
+- [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
+- [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
 - [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
 - [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
 - [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
