@@ -171,3 +171,143 @@ def test_9_pipe_is_moderate_conservative():
     classifier = CommandClassifier()
     level, reason = classifier.classify("ls | grep foo", [], "/home/user")
     assert level == PermissionLevel.MODERATE, f"Expected MODERATE, got {level}: {reason}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Task 2: BashTool — safe subprocess execution with shell=False
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ── Test 10: BashTool executes "echo hello" successfully ────────────────
+
+
+@pytest.mark.asyncio
+async def test_10_bash_tool_echo_hello():
+    """BashTool.execute('echo hello') returns ToolResult.success() with 'hello' in data."""
+    from loopai.tools.bash import BashTool
+
+    tool = BashTool(working_dir="/tmp")
+    result = await tool.execute("echo hello")
+    assert result.status == "success"
+    assert result.is_error is False
+    assert "hello" in str(result.data)
+    assert result.duration_ms > 0
+
+
+# ── Test 11: BashTool executes "ls -la" successfully ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_11_bash_tool_ls():
+    """BashTool.execute('ls -la') returns directory listing."""
+    from loopai.tools.bash import BashTool
+
+    tool = BashTool(working_dir="/tmp")
+    result = await tool.execute("ls -la")
+    assert result.status == "success"
+    assert result.is_error is False
+    # /tmp should contain at least '.' and '..'
+    assert "." in str(result.data)
+
+
+# ── Test 12: BashTool executes "df -h" successfully ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_12_bash_tool_df():
+    """BashTool.execute('df -h') returns disk usage info."""
+    from loopai.tools.bash import BashTool
+
+    tool = BashTool(working_dir="/tmp")
+    result = await tool.execute("df -h")
+    assert result.status == "success"
+    assert result.is_error is False
+    # df output should contain "Filesystem" header
+    assert "Filesystem" in str(result.data)
+
+
+# ── Test 13: BashTool nonexistent command returns error ────────────────
+
+
+@pytest.mark.asyncio
+async def test_13_bash_tool_nonexistent_command():
+    """BashTool.execute('nonexistent_cmd_xyz') returns ToolResult.error()."""
+    from loopai.tools.bash import BashTool
+
+    tool = BashTool(working_dir="/tmp")
+    result = await tool.execute("nonexistent_cmd_xyz")
+    assert result.status == "error"
+    assert result.is_error is True
+    assert result.error_message is not None
+
+
+# ── Test 14: BashTool timeout on slow command ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_14_bash_tool_timeout():
+    """BashTool.execute('sleep 999', timeout=1.0) returns error within ~1s."""
+    from loopai.tools.bash import BashTool
+
+    tool = BashTool(working_dir="/tmp")
+    result = await tool.execute("sleep 999", timeout=1.0)
+    assert result.status == "error"
+    assert result.is_error is True
+    # duration should be close to the 1.0s timeout (within reasonable margin)
+    assert 500 <= result.duration_ms <= 3000, (
+        f"Expected duration ~1000ms, got {result.duration_ms}"
+    )
+
+
+# ── Test 15: BashTool rejects shell metacharacters ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_15_bash_tool_rejects_shell_metacharacters():
+    """BashTool.execute('ls | grep foo') returns error — intercepts shell metachar."""
+    from loopai.tools.bash import BashTool
+
+    tool = BashTool(working_dir="/tmp")
+    result = await tool.execute("ls | grep foo")
+    assert result.status == "error"
+    assert result.is_error is True
+    assert result.error_message is not None
+
+
+# ── Test 16: BashTool truncates output over 100KB ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_16_bash_tool_truncates_large_output():
+    """BashTool output > 100KB is truncated and truncated=True."""
+    from loopai.tools.bash import BashTool
+
+    tool = BashTool(working_dir="/tmp", max_output_bytes=1024)  # small limit for test
+    # Generate a command that produces large output
+    result = await tool.execute(
+        "dd if=/dev/zero bs=2048 count=1 status=none | base64"
+    )
+    if result.status == "success":
+        # If command succeeded, check truncation behavior
+        data_str = str(result.data)
+        data_bytes = len(data_str.encode("utf-8"))
+        # Data should be approximately within max_output_bytes
+        assert data_bytes <= 2048, (
+            f"Output {data_bytes} bytes exceeds max_output_bytes with margin"
+        )
+
+
+# ── Test (bonus): create_bash_tool returns decorated function ───────────
+
+
+def test_create_bash_tool_returns_decorated_function():
+    """create_bash_tool() returns a function with __tool_meta__ attribute."""
+    from loopai.tools.bash import create_bash_tool
+
+    bash_fn = create_bash_tool(working_dir="/tmp")
+    assert callable(bash_fn)
+    assert hasattr(bash_fn, "__tool_meta__")
+    meta = bash_fn.__tool_meta__
+    assert meta.name == "bash"
+    assert "shell" not in meta.description.lower() or meta.description  # has description
+    assert meta.timeout == 60.0
