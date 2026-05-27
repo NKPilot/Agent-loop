@@ -18,18 +18,16 @@ Decision references:
 
 from __future__ import annotations
 
-import math
 import random
-from enum import Enum
-from typing import Any, Callable, Literal
+from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
 
 # ── Enumerations ──────────────────────────────────────────────────────
 
 
-class ErrorCategory(str, Enum):
+class ErrorCategory(StrEnum):
     """Error classification for retry decision logic (D-11, D-13).
 
     Each category maps to a different recovery strategy:
@@ -46,7 +44,7 @@ class ErrorCategory(str, Enum):
     FATAL = "fatal"
 
 
-class PermissionLevel(str, Enum):
+class PermissionLevel(StrEnum):
     """Security classification for tool operations (D-08, D-10).
 
     * **SAFE** — Read-only operations within working directory
