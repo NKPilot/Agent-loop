@@ -19,7 +19,15 @@ from loopai.events.bus import EventBus
 from loopai.llm.client import LLMClient
 from loopai.session.context import Session
 from loopai.state_machine.fsm import ReActFSM
-from loopai.state_machine.guards import BudgetGuard, LoopDetector, MessageValidator
+from loopai.state_machine.guards import (
+    BudgetGuard,
+    LoopDetector,
+    MessageValidator,
+    PermissionGuard,
+)
+from loopai.tools.bash import create_bash_tool
+from loopai.tools.executor import ToolExecutor
+from loopai.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from loopai.config import AgentConfig
@@ -59,9 +67,12 @@ async def run_session(
     session.add_message(
         "system",
         content=(
-            "You are a helpful AI assistant. Answer the user's questions "
-            "clearly and concisely. If you need to use tools but none are "
-            "available, provide your best answer based on your knowledge."
+            "You are a helpful AI assistant with access to a Bash tool. "
+            "Use the 'bash' tool to execute shell commands when needed. "
+            "The bash tool supports common commands like ls, df, du, find, "
+            "cat, head, tail, grep, sort, echo, and stat. "
+            "Dangerous commands (rm, dd, mkfs) require user confirmation. "
+            "Always explain what you're doing before running commands."
         ),
     )
     session.add_message("user", content=prompt)
@@ -71,7 +82,22 @@ async def run_session(
     budget_guard = BudgetGuard(max_steps=actual_max)
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+
+    # ── Wire up tool system (Phase 2) ──────────────────────────────
+    registry = ToolRegistry()
+    executor = ToolExecutor(registry)
+    permission_guard = PermissionGuard(
+        bus, confirmation_timeout=config.confirmation_timeout
+    )
+
+    # Register Bash tool
+    bash_fn = create_bash_tool(working_dir=config.tool_working_dir)
+    registry.register(bash_fn)
+
+    fsm = ReActFSM(
+        client, bus, budget_guard, loop_detector, message_validator,
+        registry, executor, permission_guard,
+    )
 
     # ── Start consumers ──────────────────────────────────────────────
     logger = JSONLLogger(session.session_id)

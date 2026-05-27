@@ -43,6 +43,31 @@ def make_response(content=None, tool_calls=None):
     }
 
 
+def _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator):
+    """Helper: create ReActFSM with Phase 1 behavior (no real tools).
+
+    The mock registry returns None for any tool lookup, simulating a
+    registry that doesn't have the requested tool registered. This keeps
+    Phase 1 test behavior intact: unknown tools get error messages.
+    """
+    from loopai.state_machine.fsm import ReActFSM
+
+    registry = MagicMock()
+    registry.get.return_value = None  # No tools registered
+    registry.get_schemas.return_value = []
+
+    executor = MagicMock()
+    executor.execute = AsyncMock()
+
+    permission_guard = MagicMock()
+    permission_guard.check = AsyncMock(return_value=(True, "allow"))
+
+    return ReActFSM(
+        client, bus, budget_guard, loop_detector, message_validator,
+        registry, executor, permission_guard,
+    )
+
+
 # ── Test 1: REASON → FINISH (D-01) ────────────────────────────────────
 
 
@@ -53,8 +78,6 @@ async def test_reason_to_finish_no_tool_calls():
     Decision D-01: When the LLM responds with content and no tool_calls,
     the agent has reached its final answer and should terminate.
     """
-    from loopai.state_machine.fsm import ReActFSM
-
     bus = EventBus()
     session = Session()
 
@@ -67,7 +90,7 @@ async def test_reason_to_finish_no_tool_calls():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    fsm = _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator)
 
     result = await fsm.run(session)
 
@@ -84,11 +107,10 @@ async def test_reason_to_finish_no_tool_calls():
 async def test_reason_to_act_with_tool_calls():
     """LLM returns tool_calls → FSM transitions REASON→ACT→OBSERVE→REASON.
 
-    The FSM handles the tool_calls, injects Phase 1 synthetic tool results,
-    and loops back to REASON for the next LLM call.
+    The FSM handles the tool_calls, attempts to look up tools in the registry,
+    and injects error messages for unregistered tools. Loops back to REASON
+    for the next LLM call.
     """
-    from loopai.state_machine.fsm import ReActFSM
-
     bus = EventBus()
     session = Session()
 
@@ -107,18 +129,17 @@ async def test_reason_to_act_with_tool_calls():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    fsm = _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator)
 
     result = await fsm.run(session)
 
     assert result.state == AgentState.FINISH
-    # Should have at least: system(user prompt implied) + assistant(tool_calls) + tool(result) + assistant(final)
     roles = [m["role"] for m in result.messages]
     assert "assistant" in roles
     assert "tool" in roles
-    # The tool result message should contain the Phase 1 synthetic response
+    # Phase 2: unregistered tools get "未注册" message
     tool_msgs = [m for m in result.messages if m["role"] == "tool"]
-    assert any("No tools are available" in (m.get("content") or "") for m in tool_msgs)
+    assert any("未注册" in (m.get("content") or "") for m in tool_msgs)
 
 
 # ── Test 3: Full ReAct cycle ──────────────────────────────────────────
@@ -131,8 +152,6 @@ async def test_full_react_cycle_multiple_steps():
     Verifies the FSM correctly loops through multiple tool-using steps
     and ultimately terminates when the LLM gives a final answer.
     """
-    from loopai.state_machine.fsm import ReActFSM
-
     bus = EventBus()
     session = Session()
 
@@ -155,7 +174,7 @@ async def test_full_react_cycle_multiple_steps():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    fsm = _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator)
 
     result = await fsm.run(session)
 
@@ -175,8 +194,6 @@ async def test_error_state_on_exception():
     The FSM transitions to ERROR (Phase 1 terminal state) and publishes
     a SessionEnd event with exit_reason="error".
     """
-    from loopai.state_machine.fsm import ReActFSM
-
     bus = EventBus()
     session = Session()
 
@@ -187,7 +204,7 @@ async def test_error_state_on_exception():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    fsm = _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator)
 
     result = await fsm.run(session)
 
@@ -211,8 +228,6 @@ async def test_step_events_emitted():
     a StepStart event at entry and StepEnd event at exit.
     SessionEnd is always published before run() returns.
     """
-    from loopai.state_machine.fsm import ReActFSM
-
     bus = EventBus()
     session = Session()
 
@@ -231,7 +246,7 @@ async def test_step_events_emitted():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    fsm = _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator)
 
     await fsm.run(session)
 
@@ -263,8 +278,6 @@ async def test_budget_guard_injects_warning():
     When step_count reaches the 80% threshold, BudgetGuard.check returns
     action="warn" and the FSM publishes a budget_warning event.
     """
-    from loopai.state_machine.fsm import ReActFSM
-
     bus = EventBus()
     session = Session()
     session.step_count = 4  # At 80% of max_steps=5 (warn_threshold=4)
@@ -278,7 +291,7 @@ async def test_budget_guard_injects_warning():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    fsm = _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator)
 
     await fsm.run(session)
 
@@ -297,8 +310,6 @@ async def test_budget_exhausted_final_summary():
     The FSM allows one more REASON cycle for the LLM to produce a final
     answer, then forces FINISH regardless of tool_calls.
     """
-    from loopai.state_machine.fsm import ReActFSM
-
     bus = EventBus()
     session = Session()
     session.step_count = 5  # At max_steps=5, triggers "final" action
@@ -316,7 +327,7 @@ async def test_budget_exhausted_final_summary():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    fsm = _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator)
 
     result = await fsm.run(session)
 
@@ -337,6 +348,10 @@ async def test_loop_detection_blocks_tool():
     When the same tool+args is called 5 times consecutively, LoopDetector
     returns (False, "block"). The FSM injects a block message and counts
     it as a failure. On the 6th call, force_exit triggers FINISH.
+
+    Note: Phase 2 adaptation — the registry mock returns valid metadata so
+    that the "未注册" path is not taken (which would trigger unreachable
+    detection before the loop detector can reach its block threshold).
     """
     from loopai.state_machine.fsm import ReActFSM
 
@@ -356,7 +371,27 @@ async def test_loop_detection_blocks_tool():
     loop_detector = LoopDetector(warn_threshold=3, block_threshold=5)
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    # Phase 2: registry must return valid metadata so loop detector reaches
+    # its threshold before unreachable detection kills the session.
+    registry = MagicMock()
+    registry.get.return_value = ToolMetadata(
+        name="bash",
+        description="Execute bash commands",
+        permission_level=PermissionLevel.SAFE,
+        timeout=60.0,
+    )
+    registry.get_schemas.return_value = []
+    executor = MagicMock()
+    executor.execute = AsyncMock(
+        return_value=ToolResult.success(data="output", duration_ms=5.0)
+    )
+    permission_guard = MagicMock()
+    permission_guard.check = AsyncMock(return_value=(True, "allow"))
+
+    fsm = ReActFSM(
+        client, bus, budget_guard, loop_detector, message_validator,
+        registry, executor, permission_guard,
+    )
 
     result = await fsm.run(session)
 
@@ -386,8 +421,6 @@ async def test_unreachable_detection_too_many_failures():
     After 3 failures, check_unreachable returns "unreachable" and the
     FSM transitions to FINISH.
     """
-    from loopai.state_machine.fsm import ReActFSM
-
     bus = EventBus()
     session = Session()
 
@@ -407,7 +440,7 @@ async def test_unreachable_detection_too_many_failures():
 
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    fsm = _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator)
 
     result = await fsm.run(session)
 
@@ -429,8 +462,6 @@ async def test_message_validation_rejects_orphans():
     without matching tool_result), MessageValidator.validate() raises
     ValidationError, and the FSM transitions to ERROR.
     """
-    from loopai.state_machine.fsm import ReActFSM
-
     bus = EventBus()
     session = Session()
 
@@ -459,7 +490,7 @@ async def test_message_validation_rejects_orphans():
     # Use real MessageValidator to detect the orphan
     message_validator = MessageValidator()
 
-    fsm = ReActFSM(client, bus, budget_guard, loop_detector, message_validator)
+    fsm = _create_phase1_fsm(client, bus, budget_guard, loop_detector, message_validator)
 
     result = await fsm.run(session)
 
@@ -654,6 +685,8 @@ async def test_fsm_waits_for_confirm_then_proceeds():
     When PermissionGuard.check() returns (True, "allow") after waiting
     for user confirmation, the FSM proceeds with tool execution.
     """
+    from loopai.state_machine.fsm import ReActFSM
+
     bus = EventBus()
     session = Session()
 
@@ -672,11 +705,35 @@ async def test_fsm_waits_for_confirm_then_proceeds():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm, registry, executor, permission_guard = _make_fsm_with_tools(
-        client, bus, budget_guard, loop_detector, message_validator
+    # Build mocks with permission_guard returning allow
+    registry = MagicMock()
+    executor = MagicMock()
+    executor.execute = AsyncMock(
+        return_value=ToolResult.success(data="Cleaned up.", duration_ms=10.0)
     )
-    # Simulate guard that returns "allowed" (after confirmation)
+    permission_guard = MagicMock()
     permission_guard.check = AsyncMock(return_value=(True, "allow"))
+
+    meta = ToolMetadata(
+        name="bash",
+        description="Execute bash commands",
+        permission_level=PermissionLevel.SAFE,
+        timeout=60.0,
+        param_schema={
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The command to run"},
+            },
+            "required": ["command"],
+        },
+    )
+    registry.get.return_value = meta
+    registry.get_schemas.return_value = [meta.to_openai_schema()]
+
+    fsm = ReActFSM(
+        client, bus, budget_guard, loop_detector, message_validator,
+        registry, executor, permission_guard,
+    )
 
     result = await fsm.run(session)
 
@@ -692,6 +749,8 @@ async def test_fsm_injects_rejection_on_user_denied():
     When PermissionGuard.check() returns (False, "user_denied"), the FSM
     must inject a "[SYSTEM] 操作被用户拒绝" message and NOT call the executor.
     """
+    from loopai.state_machine.fsm import ReActFSM
+
     bus = EventBus()
     session = Session()
 
@@ -710,11 +769,35 @@ async def test_fsm_injects_rejection_on_user_denied():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm, registry, executor, permission_guard = _make_fsm_with_tools(
-        client, bus, budget_guard, loop_detector, message_validator
+    # Build mocks with permission_guard returning deny from the start
+    registry = MagicMock()
+    executor = MagicMock()
+    executor.execute = AsyncMock(
+        return_value=ToolResult.success(data="output", duration_ms=10.0)
     )
-    # Simulate user denying the operation
+    permission_guard = MagicMock()
     permission_guard.check = AsyncMock(return_value=(False, "user_denied"))
+
+    meta = ToolMetadata(
+        name="bash",
+        description="Execute bash commands",
+        permission_level=PermissionLevel.SAFE,
+        timeout=60.0,
+        param_schema={
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The command to run"},
+            },
+            "required": ["command"],
+        },
+    )
+    registry.get.return_value = meta
+    registry.get_schemas.return_value = [meta.to_openai_schema()]
+
+    fsm = ReActFSM(
+        client, bus, budget_guard, loop_detector, message_validator,
+        registry, executor, permission_guard,
+    )
 
     result = await fsm.run(session)
 
@@ -724,7 +807,7 @@ async def test_fsm_injects_rejection_on_user_denied():
     # Rejection message should be in tool messages
     tool_msgs = [m for m in result.messages if m["role"] == "tool"]
     rejected_msgs = [
-        m for m in tool_msgs if "被拒绝" in (m.get("content") or "")
+        m for m in tool_msgs if "用户拒绝" in (m.get("content") or "")
     ]
     assert len(rejected_msgs) >= 1
 
@@ -736,6 +819,8 @@ async def test_fsm_injects_timeout_on_confirmation_timeout():
     When PermissionGuard.check() returns (False, "timeout"), the FSM
     must inject a "[SYSTEM] 操作被确认超时" message and NOT call the executor.
     """
+    from loopai.state_machine.fsm import ReActFSM
+
     bus = EventBus()
     session = Session()
 
@@ -754,11 +839,35 @@ async def test_fsm_injects_timeout_on_confirmation_timeout():
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
 
-    fsm, registry, executor, permission_guard = _make_fsm_with_tools(
-        client, bus, budget_guard, loop_detector, message_validator
+    # Build mocks with permission_guard returning timeout
+    registry = MagicMock()
+    executor = MagicMock()
+    executor.execute = AsyncMock(
+        return_value=ToolResult.success(data="output", duration_ms=10.0)
     )
-    # Simulate timeout
+    permission_guard = MagicMock()
     permission_guard.check = AsyncMock(return_value=(False, "timeout"))
+
+    meta = ToolMetadata(
+        name="bash",
+        description="Execute bash commands",
+        permission_level=PermissionLevel.SAFE,
+        timeout=60.0,
+        param_schema={
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The command to run"},
+            },
+            "required": ["command"],
+        },
+    )
+    registry.get.return_value = meta
+    registry.get_schemas.return_value = [meta.to_openai_schema()]
+
+    fsm = ReActFSM(
+        client, bus, budget_guard, loop_detector, message_validator,
+        registry, executor, permission_guard,
+    )
 
     result = await fsm.run(session)
 
