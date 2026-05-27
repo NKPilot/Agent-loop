@@ -156,3 +156,61 @@ class TestValidation:
 
         with pytest.raises(ValueError, match="OPENAI_API_KEY environment variable is required"):
             load_config()
+
+
+class TestToolConfigDefaults:
+    """测试工具配置字段的默认值。"""
+
+    def test_tool_config_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AgentConfig() 默认值包含工具配置字段。"""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+        config = load_config()
+
+        assert config.tool_working_dir == "/home/user"
+        assert config.tool_timeout == 60.0
+        assert config.confirmation_timeout == 120.0
+
+    def test_tool_config_env_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """环境变量可覆盖工具配置字段。"""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("LOOPAI_TOOL_WORKING_DIR", "/tmp/sandbox")
+        monkeypatch.setenv("LOOPAI_TOOL_TIMEOUT", "30")
+        monkeypatch.setenv("LOOPAI_CONFIRMATION_TIMEOUT", "60")
+
+        config = load_config()
+
+        assert config.tool_working_dir == "/tmp/sandbox"
+        assert config.tool_timeout == 30.0
+        assert config.confirmation_timeout == 60.0
+
+    def test_tool_config_cli_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """CLI 参数可覆盖工具配置字段。"""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("LOOPAI_TOOL_WORKING_DIR", "/tmp/sandbox")
+        monkeypatch.setenv("LOOPAI_TOOL_TIMEOUT", "30")
+        monkeypatch.setenv("LOOPAI_CONFIRMATION_TIMEOUT", "60")
+
+        parser = argparse.ArgumentParser()
+        add_cli_args(parser)
+        cli_args = parser.parse_args([
+            "--tool-working-dir", "/home/agent-workspace",
+            "--tool-timeout", "90",
+            "--confirmation-timeout", "180",
+        ])
+
+        config = load_config(cli_args)
+
+        assert config.tool_working_dir == "/home/agent-workspace"
+        assert config.tool_timeout == 90.0
+        assert config.confirmation_timeout == 180.0
+
+    def test_tool_config_cli_flags_registered(self) -> None:
+        """add_cli_args 注册了所有工具配置 CLI 标志。"""
+        parser = argparse.ArgumentParser()
+        add_cli_args(parser)
+
+        actions = {action.dest for action in parser._actions}
+        assert "tool_working_dir" in actions
+        assert "tool_timeout" in actions
+        assert "confirmation_timeout" in actions
