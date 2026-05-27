@@ -1,13 +1,15 @@
 """ReActFSM: ReAct loop state machine with guard integration.
 
 Drives the agent through the REASON -> ACT -> OBSERVE cycle defined in D-02.
-Integrates BudgetGuard, LoopDetector, and MessageValidator at their specified
+Integrates BudgetGuard, LoopDetector, MessageValidator, and (Phase 2)
+ToolRegistry, ToolExecutor, and PermissionGuard at their specified
 intervention points. Publishes StepStart/StepEnd/SessionEnd events for
 observability.
 """
 
 from __future__ import annotations
 
+import json as _json
 import traceback
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +20,14 @@ if TYPE_CHECKING:
     from loopai.events.bus import EventBus
     from loopai.llm.client import LLMClient
     from loopai.session.context import Session
-    from loopai.state_machine.guards import BudgetGuard, LoopDetector, MessageValidator
+    from loopai.state_machine.guards import (
+        BudgetGuard,
+        LoopDetector,
+        MessageValidator,
+        PermissionGuard,
+    )
+    from loopai.tools.executor import ToolExecutor
+    from loopai.tools.registry import ToolRegistry
 
 
 class ReActFSM:
@@ -28,12 +37,18 @@ class ReActFSM:
     for observability. Each iteration through the main loop dispatches to
     a handler based on the current AgentState.
 
+    Phase 2 additions: ToolRegistry for tool lookup, ToolExecutor for
+    actual tool execution, PermissionGuard for dangerous command confirmation.
+
     Attributes:
         client: LLMClient for API calls with streaming.
         bus: EventBus for publishing observability events.
         budget_guard: BudgetGuard for step budget enforcement.
         loop_detector: LoopDetector for tool call loop detection.
         message_validator: MessageValidator for message structure validation.
+        registry: ToolRegistry for tool metadata lookup and schema export.
+        executor: ToolExecutor for actual tool execution.
+        permission_guard: PermissionGuard for dangerous command confirmation.
     """
 
     def __init__(
@@ -43,12 +58,18 @@ class ReActFSM:
         budget_guard: BudgetGuard,
         loop_detector: LoopDetector,
         message_validator: MessageValidator,
+        registry: ToolRegistry,
+        executor: ToolExecutor,
+        permission_guard: PermissionGuard,
     ) -> None:
         self.client = client
         self.bus = bus
         self.budget_guard = budget_guard
         self.loop_detector = loop_detector
         self.message_validator = message_validator
+        self.registry = registry
+        self.executor = executor
+        self.permission_guard = permission_guard
         self._exit_reason = "completed"
         self._last_act_failed = False
 
@@ -127,9 +148,11 @@ class ReActFSM:
             # Increment step count now (before LLM call) so SessionEnd reports correctly
             session.increment_step()
 
-            # LLM call with (possibly modified) messages
+            # LLM call with (possibly modified) messages and registered tools
+            tool_schemas = self.registry.get_schemas() if self.registry else None
             response = await self.client.complete(
                 messages,
+                tools=tool_schemas,
                 session_id=session.session_id,
                 step_num=step_num,
             )
@@ -201,11 +224,15 @@ class ReActFSM:
         )
 
     async def _handle_act(self, session: Session) -> None:
-        """Handle the ACT state: loop-detect tool calls, execute (or stub) tools.
+        """Handle the ACT state: loop-detect, permission-check, execute tools.
 
-        For Phase 1, no real tools exist. Each tool_call gets a synthetic
-        tool_result message indicating tools are unavailable. Blocked or
-        force-exited tool calls are handled per LoopDetector results.
+        Phase 2 implementation — replaces the Phase 1 synthetic stub with
+        a full tool pipeline:
+        1. LoopGuard check (detect infinite loops)
+        2. Registry lookup (find tool metadata)
+        3. PermissionGuard check (confirm dangerous commands)
+        4. ToolExecutor.execute() (run the tool)
+        5. Publish tool_result event + inject result into session
 
         Transitions:
         - tool(s) processed -> OBSERVE
@@ -217,18 +244,17 @@ class ReActFSM:
 
         for tc in tool_calls_data:
             tool_name = tc.get("name", "unknown")
-            tool_call_id = tc.get("tool_call_id", "")
+            tool_call_id = tc.get("id", "") or tc.get("tool_call_id", "")
 
             # Resolve arguments: may be a dict or a JSON string
             raw_args = tc.get("arguments", {})
             if isinstance(raw_args, str):
-                import json as _json
                 try:
                     raw_args = _json.loads(raw_args)
                 except _json.JSONDecodeError:
                     raw_args = {}
 
-            # Guard: loop detection
+            # Guard: loop detection (Phase 1 — unchanged)
             should_proceed, loop_action = self.loop_detector.check(
                 tool_name, raw_args
             )
@@ -265,17 +291,84 @@ class ReActFSM:
                 any_blocked = True
                 continue
 
-            # Phase 1: synthetic tool result (no actual tool execution)
+            # ── Phase 2: Real tool pipeline ──────────────────────────
+
+            # Step 1: Look up tool in registry
+            metadata = self.registry.get(tool_name)
+            if metadata is None:
+                session.add_message(
+                    "tool",
+                    content=f"[SYSTEM] 工具 '{tool_name}' 未注册，无法执行。请尝试其他方法。",
+                    tool_call_id=tool_call_id,
+                )
+                any_blocked = True
+                continue
+
+            # Step 2: Permission check (D-09)
+            perm_result, perm_action = await self.permission_guard.check(
+                tool_name,
+                raw_args,
+                metadata.permission_level,
+                session.session_id,
+                step_num,
+            )
+
+            if not perm_result:
+                # User denied or confirmation timed out
+                if perm_action == "user_denied":
+                    session.add_message(
+                        "tool",
+                        content=f"[SYSTEM] 操作被用户拒绝：{tool_name}",
+                        tool_call_id=tool_call_id,
+                    )
+                elif perm_action == "timeout":
+                    session.add_message(
+                        "tool",
+                        content=f"[SYSTEM] 操作确认超时：{tool_name}",
+                        tool_call_id=tool_call_id,
+                    )
+                else:
+                    session.add_message(
+                        "tool",
+                        content=f"[SYSTEM] 操作被阻止：{tool_name}",
+                        tool_call_id=tool_call_id,
+                    )
+                any_blocked = True
+                continue
+
+            # Step 3: Execute the tool via ToolExecutor
+            result = await self.executor.execute(tool_name, raw_args)
+
+            # Step 4: Publish ToolResult event
+            await self.bus.publish(
+                "tool_result",
+                {
+                    "event_type": "tool_result",
+                    "session_id": session.session_id,
+                    "step_num": step_num,
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "result": str(result.data) if result.data else "",
+                    "is_error": result.is_error,
+                    "duration_ms": result.duration_ms,
+                },
+            )
+
+            # Step 5: Inject tool_result into session messages
+            tool_content = (
+                str(result.data) if result.data is not None
+                else (result.error_message or "")
+            )
             session.add_message(
                 "tool",
-                content=(
-                    "[SYSTEM] No tools are available in Phase 1. "
-                    "Please provide your answer directly."
-                ),
+                content=tool_content,
                 tool_call_id=tool_call_id,
             )
 
-        # Track whether any tool was blocked (for unreachable detection)
+            if result.is_error:
+                any_blocked = True
+
+        # Track whether any tool failed (for unreachable detection)
         self._last_act_failed = any_blocked
         session.state = AgentState.OBSERVE
 
