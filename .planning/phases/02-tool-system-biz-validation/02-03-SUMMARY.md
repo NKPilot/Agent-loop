@@ -34,7 +34,7 @@ decisions:
   - "Loop detection test adapted: registry returns valid metadata to avoid unreachable detection triggering before loop detector reaches block threshold"
   - "CLI confirmation: Live display is paused during console.input() to avoid rendering conflicts"
 metrics:
-  duration: ""
+  duration: "12 min"
   completed_date: "2026-05-27"
   task_count: 3
   total_tests: 184
@@ -92,8 +92,6 @@ metrics:
 - **Issue:** test_loop_detection_blocks_tool 中 mock registry 返回 None 导致 "未注册" 失败被计入 unreachable 计数器，在循环检测达到 block 阈值前就终止了 session
 - **Fix:** 更新测试使用返回有效 ToolMetadata 的 mock registry（而非 None），让循环检测器正常累积计数
 - **Files modified:** tests/test_fsm.py
-
-None - plan executed exactly as written.
 
 ## Test Results
 
