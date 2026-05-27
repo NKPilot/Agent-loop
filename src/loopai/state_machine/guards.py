@@ -169,3 +169,90 @@ class MessageValidator:
                 f"has no matching tool result",
                 tool_call_id=orphan,
             )
+
+
+class BudgetGuard:
+    """步数预算守卫，防止 Agent 会话失控。
+
+    在 OBSERVE→REASON 转换时运行。
+    - 在 80% 预算时注入系统警告消息，提醒 LLM 优先给出结论。
+    - 在 100% 预算时注入最终摘要提示，要求 LLM 基于已有信息给出答案。
+    - 通过 check_unreachable() 方法检测连续失败，发出不可达信号。
+
+    Attributes:
+        max_steps: 最大步骤预算，默认 15。
+        warn_pct: 警告阈值百分比，默认 0.80 (80%)。
+    """
+
+    def __init__(self, max_steps: int = 15, warn_pct: float = 0.80) -> None:
+        self.max_steps = max_steps
+        self.warn_threshold = int(max_steps * warn_pct)
+        self._consecutive_failures = 0
+
+    def check(
+        self, step_count: int, messages: list[dict]
+    ) -> tuple[bool, list[dict], str | None]:
+        """根据当前步数检查预算状态。
+
+        注入的系统消息永远不会修改原始消息 —— 总是返回一个副本。
+
+        Args:
+            step_count: 当前步数。
+            messages: 当前消息列表。
+
+        Returns:
+            (should_continue, modified_messages, action) 元组。
+            - should_continue: 始终为 True（预算耗尽时仍给一次最终回答机会）。
+            - modified_messages: 消息列表副本，可能附加了系统消息。
+            - action: None（正常）、"warn"（预算警告）或 "final"（预算耗尽）。
+        """
+        # 始终返回副本，不修改输入
+        msgs = list(messages)
+
+        if step_count >= self.max_steps:
+            final_msg = {
+                "role": "system",
+                "content": (
+                    "Your step budget has been exhausted. "
+                    "Based on the information you have gathered so far, "
+                    "provide your best final answer. Do not call any tools."
+                ),
+            }
+            msgs = msgs + [final_msg]
+            return (True, msgs, "final")
+
+        if step_count >= self.warn_threshold:
+            pct = int(step_count / self.max_steps * 100)
+            remaining = self.max_steps - step_count
+            warn_msg = {
+                "role": "system",
+                "content": (
+                    f"Step budget at {pct}%. "
+                    f"{remaining} steps remaining. "
+                    f"Prioritize reaching a conclusion."
+                ),
+            }
+            msgs = msgs + [warn_msg]
+            return (True, msgs, "warn")
+
+        return (True, msgs, None)
+
+    def check_unreachable(self, is_failure: bool) -> str | None:
+        """检测目标是否不可达成。
+
+        追踪连续失败次数。当连续失败 >= 3 次时发出 "unreachable" 信号。
+
+        Args:
+            is_failure: 当前步骤是否为失败。
+
+        Returns:
+            "unreachable" 如果连续失败 >= 3 次，否则 None。
+        """
+        if is_failure:
+            self._consecutive_failures += 1
+        else:
+            self._consecutive_failures = 0
+
+        if self._consecutive_failures >= 3:
+            return "unreachable"
+        return None
