@@ -16,8 +16,10 @@ from loopai.state_machine.guards import (
     BudgetGuard,
     LoopDetector,
     MessageValidator,
+    PermissionGuard,
     ValidationError,
 )
+from loopai.tools.types import ToolMetadata, ToolResult, PermissionLevel
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -469,3 +471,303 @@ async def test_message_validation_rejects_orphans():
     session_ends = bus.replay("session_end")
     assert len(session_ends) == 1
     assert session_ends[0]["final_state"] == "error"
+
+
+# ── Phase 2 Tests: Tool Registry + Executor + PermissionGuard ─────────
+
+
+def _make_fsm_with_tools(client, bus, budget_guard, loop_detector, message_validator):
+    """Helper: create ReActFSM with tool mocks for Phase 2 tests."""
+    from loopai.state_machine.fsm import ReActFSM
+
+    registry = MagicMock()
+    executor = MagicMock()
+    executor.execute = AsyncMock(
+        return_value=ToolResult.success(data="output", duration_ms=10.0)
+    )
+    permission_guard = MagicMock()
+    permission_guard.check = AsyncMock(return_value=(True, "allow"))
+
+    # Register a mock tool metadata
+    meta = ToolMetadata(
+        name="bash",
+        description="Execute bash commands",
+        permission_level=PermissionLevel.SAFE,
+        timeout=60.0,
+        param_schema={
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The command to run"},
+            },
+            "required": ["command"],
+        },
+    )
+    registry.get.return_value = meta
+    registry.get_schemas.return_value = [meta.to_openai_schema()]
+
+    fsm = ReActFSM(
+        client, bus, budget_guard, loop_detector, message_validator,
+        registry, executor, permission_guard,
+    )
+    return fsm, registry, executor, permission_guard
+
+
+@pytest.mark.asyncio
+async def test_fsm_uses_tool_registry_and_executor():
+    """Test 5: FSM._handle_act() uses ToolRegistry + ToolExecutor for tool execution.
+
+    Verifies that when the LLM returns a tool_call, the FSM:
+    1. Looks up the tool in the registry
+    2. Calls executor.execute() with the tool name and arguments
+    3. Publishes a tool_result event with execution results
+    """
+    bus = EventBus()
+    session = Session()
+
+    client = MagicMock()
+    client.complete = AsyncMock(
+        side_effect=[
+            make_response(
+                content=None,
+                tool_calls=[make_tool_call("bash", {"command": "ls -la"}, "call_1")],
+            ),
+            make_response(content="Done."),
+        ]
+    )
+
+    budget_guard = BudgetGuard(max_steps=15)
+    loop_detector = LoopDetector()
+    message_validator = MessageValidator()
+
+    fsm, registry, executor, permission_guard = _make_fsm_with_tools(
+        client, bus, budget_guard, loop_detector, message_validator
+    )
+
+    result = await fsm.run(session)
+
+    # Tool was looked up
+    registry.get.assert_called_with("bash")
+
+    # Executor was called with the correct arguments
+    executor.execute.assert_called_with("bash", {"command": "ls -la"})
+
+    # Tool result event was published
+    tool_results = bus.replay("tool_result")
+    assert len(tool_results) >= 1
+    assert tool_results[0]["tool_name"] == "bash"
+    assert tool_results[0]["tool_call_id"] == "call_1"
+    assert tool_results[0]["is_error"] is False
+    assert "duration_ms" in tool_results[0]
+
+    # Tool result message is in the session
+    assert result.state == AgentState.FINISH
+
+
+@pytest.mark.asyncio
+async def test_fsm_handles_unregistered_tool():
+    """Test 6: FSM injects "工具未注册" message for unknown tools.
+
+    When the LLM tries to call a tool that's not in the registry,
+    the FSM injects a system message indicating the tool is not registered
+    and does NOT call the executor.
+    """
+    bus = EventBus()
+    session = Session()
+
+    client = MagicMock()
+    client.complete = AsyncMock(
+        side_effect=[
+            make_response(
+                content=None,
+                tool_calls=[make_tool_call("unknown_tool", {}, "call_x")],
+            ),
+            make_response(content="Final answer."),
+        ]
+    )
+
+    budget_guard = BudgetGuard(max_steps=15)
+    loop_detector = LoopDetector()
+    message_validator = MessageValidator()
+
+    fsm, registry, executor, permission_guard = _make_fsm_with_tools(
+        client, bus, budget_guard, loop_detector, message_validator
+    )
+    # Override: tool is NOT registered
+    registry.get.return_value = None
+
+    result = await fsm.run(session)
+
+    # Executor should NOT have been called for the unknown tool
+    executor.execute.assert_not_called()
+
+    # Tool result message should contain "未注册"
+    tool_msgs = [m for m in result.messages if m["role"] == "tool"]
+    unregistered_msgs = [
+        m for m in tool_msgs if "未注册" in (m.get("content") or "")
+    ]
+    assert len(unregistered_msgs) >= 1
+
+
+@pytest.mark.asyncio
+async def test_fsm_permission_guard_check_called():
+    """Test 7: FSM calls PermissionGuard.check() before executing tools.
+
+    The FSM must always invoke the permission guard's check method
+    with the tool_name, tool_args, permission_level, session_id, and
+    step_num BEFORE calling executor.execute().
+    """
+    bus = EventBus()
+    session = Session()
+
+    client = MagicMock()
+    client.complete = AsyncMock(
+        side_effect=[
+            make_response(
+                content=None,
+                tool_calls=[make_tool_call("bash", {"command": "rm -rf /tmp/x"}, "call_danger")],
+            ),
+            make_response(content="Done."),
+        ]
+    )
+
+    budget_guard = BudgetGuard(max_steps=15)
+    loop_detector = LoopDetector()
+    message_validator = MessageValidator()
+
+    fsm, registry, executor, permission_guard = _make_fsm_with_tools(
+        client, bus, budget_guard, loop_detector, message_validator
+    )
+
+    result = await fsm.run(session)
+
+    # PermissionGuard.check() was called
+    permission_guard.check.assert_called()
+    call_args = permission_guard.check.call_args
+    assert call_args[0][0] == "bash"  # tool_name
+    assert call_args[0][1] == {"command": "rm -rf /tmp/x"}  # tool_args
+
+
+@pytest.mark.asyncio
+async def test_fsm_waits_for_confirm_then_proceeds():
+    """Test 8: FSM waits for PermissionGuard confirmation, then proceeds.
+
+    When PermissionGuard.check() returns (True, "allow") after waiting
+    for user confirmation, the FSM proceeds with tool execution.
+    """
+    bus = EventBus()
+    session = Session()
+
+    client = MagicMock()
+    client.complete = AsyncMock(
+        side_effect=[
+            make_response(
+                content=None,
+                tool_calls=[make_tool_call("bash", {"command": "rm /tmp/x"}, "call_danger")],
+            ),
+            make_response(content="Cleaned up."),
+        ]
+    )
+
+    budget_guard = BudgetGuard(max_steps=15)
+    loop_detector = LoopDetector()
+    message_validator = MessageValidator()
+
+    fsm, registry, executor, permission_guard = _make_fsm_with_tools(
+        client, bus, budget_guard, loop_detector, message_validator
+    )
+    # Simulate guard that returns "allowed" (after confirmation)
+    permission_guard.check = AsyncMock(return_value=(True, "allow"))
+
+    result = await fsm.run(session)
+
+    # Executor should have been called (confirmation was granted)
+    executor.execute.assert_called()
+    assert result.state == AgentState.FINISH
+
+
+@pytest.mark.asyncio
+async def test_fsm_injects_rejection_on_user_denied():
+    """Test 9: FSM injects rejection message when user denies confirmation.
+
+    When PermissionGuard.check() returns (False, "user_denied"), the FSM
+    must inject a "[SYSTEM] 操作被用户拒绝" message and NOT call the executor.
+    """
+    bus = EventBus()
+    session = Session()
+
+    client = MagicMock()
+    client.complete = AsyncMock(
+        side_effect=[
+            make_response(
+                content=None,
+                tool_calls=[make_tool_call("bash", {"command": "rm /tmp/x"}, "call_rejected")],
+            ),
+            make_response(content="OK, I won't delete that."),
+        ]
+    )
+
+    budget_guard = BudgetGuard(max_steps=15)
+    loop_detector = LoopDetector()
+    message_validator = MessageValidator()
+
+    fsm, registry, executor, permission_guard = _make_fsm_with_tools(
+        client, bus, budget_guard, loop_detector, message_validator
+    )
+    # Simulate user denying the operation
+    permission_guard.check = AsyncMock(return_value=(False, "user_denied"))
+
+    result = await fsm.run(session)
+
+    # Executor should NOT have been called
+    executor.execute.assert_not_called()
+
+    # Rejection message should be in tool messages
+    tool_msgs = [m for m in result.messages if m["role"] == "tool"]
+    rejected_msgs = [
+        m for m in tool_msgs if "被拒绝" in (m.get("content") or "")
+    ]
+    assert len(rejected_msgs) >= 1
+
+
+@pytest.mark.asyncio
+async def test_fsm_injects_timeout_on_confirmation_timeout():
+    """Test 10: FSM injects timeout message when confirmation times out.
+
+    When PermissionGuard.check() returns (False, "timeout"), the FSM
+    must inject a "[SYSTEM] 操作被确认超时" message and NOT call the executor.
+    """
+    bus = EventBus()
+    session = Session()
+
+    client = MagicMock()
+    client.complete = AsyncMock(
+        side_effect=[
+            make_response(
+                content=None,
+                tool_calls=[make_tool_call("bash", {"command": "dd if=/dev/zero"}, "call_timeout")],
+            ),
+            make_response(content="I'll try something else."),
+        ]
+    )
+
+    budget_guard = BudgetGuard(max_steps=15)
+    loop_detector = LoopDetector()
+    message_validator = MessageValidator()
+
+    fsm, registry, executor, permission_guard = _make_fsm_with_tools(
+        client, bus, budget_guard, loop_detector, message_validator
+    )
+    # Simulate timeout
+    permission_guard.check = AsyncMock(return_value=(False, "timeout"))
+
+    result = await fsm.run(session)
+
+    # Executor should NOT have been called
+    executor.execute.assert_not_called()
+
+    # Timeout message should be in tool messages
+    tool_msgs = [m for m in result.messages if m["role"] == "tool"]
+    timeout_msgs = [
+        m for m in tool_msgs if "超时" in (m.get("content") or "")
+    ]
+    assert len(timeout_msgs) >= 1
