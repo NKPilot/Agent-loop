@@ -44,7 +44,7 @@
   5. 磁盘空间诊断与清理全流程跑通：agent 扫描磁盘 -> 定位大文件 -> 分析安全性 -> 请求确认 -> 清理，用户可通过终端交互完成
 **计划**: 4 plans
 **Plans:**
-- [ ] 02-01-PLAN.md — 工具系统基础：类型定义、@tool 装饰器（自动 Schema 生成）、ToolRegistry、执行管线（含错误分类+重试）
+- [x] 02-01-PLAN.md — 工具系统基础：类型定义、@tool 装饰器（自动 Schema 生成）、ToolRegistry、执行管线（含错误分类+重试）
 - [ ] 02-02-PLAN.md — Bash 工具与权限系统：命令分类器（白名单/黑名单+路径感知）、BashTool（安全 subprocess）、PermissionGuard
 - [ ] 02-03-PLAN.md — FSM 集成与 CLI 确认：事件 Schema 扩展、ReActFSM 重构（真实工具管线）、CLI 确认交互
 - [ ] 02-04-PLAN.md — 磁盘清理业务验证：4 磁盘工具注册、预设沙箱场景、端到端流程测试
