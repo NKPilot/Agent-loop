@@ -22,12 +22,18 @@ class AgentConfig(BaseModel):
         base_url: OpenAI API 基础 URL，默认 https://api.openai.com/v1。
         model: 要使用的模型名称，默认 gpt-4o。
         max_steps: 最大步骤预算，默认 15。
+        tool_working_dir: Bash 工具的工作目录，默认 /home/user。
+        tool_timeout: 工具执行默认超时（秒），默认 60.0。
+        confirmation_timeout: 危险命令确认等待超时（秒），默认 120.0。
     """
 
     api_key: SecretStr
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4o"
     max_steps: int = 15
+    tool_working_dir: str = "/home/user"
+    tool_timeout: float = 60.0
+    confirmation_timeout: float = 120.0
 
     @model_validator(mode="after")
     def _validate_api_key_not_empty(self) -> AgentConfig:
@@ -66,6 +72,23 @@ def add_cli_args(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
         help="最大步骤预算（覆盖默认值 15）",
     )
+    parser.add_argument(
+        "--tool-working-dir",
+        default=argparse.SUPPRESS,
+        help="Bash 工具的工作目录（覆盖默认值 /home/user）",
+    )
+    parser.add_argument(
+        "--tool-timeout",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="工具执行默认超时秒数（覆盖默认值 60.0）",
+    )
+    parser.add_argument(
+        "--confirmation-timeout",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="危险命令确认等待超时秒数（覆盖默认值 120.0）",
+    )
 
 
 def load_config(cli_args: argparse.Namespace | None = None) -> AgentConfig:
@@ -94,11 +117,26 @@ def load_config(cli_args: argparse.Namespace | None = None) -> AgentConfig:
     max_steps_str = _get_cli_or_env(cli, "max_steps", None, "15")
     max_steps = int(max_steps_str) if max_steps_str else 15
 
+    tool_working_dir = _get_cli_or_env(
+        cli, "tool_working_dir", "LOOPAI_TOOL_WORKING_DIR", "/home/user"
+    )
+    tool_timeout_str = _get_cli_or_env(
+        cli, "tool_timeout", "LOOPAI_TOOL_TIMEOUT", "60.0"
+    )
+    tool_timeout = float(tool_timeout_str) if tool_timeout_str else 60.0
+    confirmation_timeout_str = _get_cli_or_env(
+        cli, "confirmation_timeout", "LOOPAI_CONFIRMATION_TIMEOUT", "120.0"
+    )
+    confirmation_timeout = float(confirmation_timeout_str) if confirmation_timeout_str else 120.0
+
     return AgentConfig(
         api_key=api_key,
         base_url=base_url,
         model=model,
         max_steps=max_steps,
+        tool_working_dir=tool_working_dir,
+        tool_timeout=tool_timeout,
+        confirmation_timeout=confirmation_timeout,
     )
 
 
