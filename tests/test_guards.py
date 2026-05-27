@@ -284,3 +284,29 @@ class TestMessageValidator:
 
         with pytest.raises(ValidationError, match="call_orphan_002"):
             MessageValidator.validate(messages)
+
+    def test_empty_message_list_passes(self) -> None:
+        """空消息列表应通过验证。"""
+        # 不应抛出异常
+        MessageValidator.validate([])
+
+
+class TestLoopDetectorEdgeCases:
+    """LoopDetector 边界条件测试。"""
+
+    def test_deque_used_instead_of_list(self) -> None:
+        """确认使用 deque (maxlen) 而非 list。"""
+        detector = LoopDetector(window_size=3)
+
+        # 添加超过窗口大小的项
+        for i in range(5):
+            detector.check(f"tool_{i}", {"arg": i})
+
+        # deque 自动丢弃旧项，_window 大小不超过 3
+        assert len(detector._window) == 3
+
+    def test_empty_args_gets_unique_signature(self) -> None:
+        """空参数列表应产生有效签名。"""
+        sig = LoopDetector._signature("empty_tool", {})
+        assert len(sig) == 16
+        assert all(c in "0123456789abcdef" for c in sig)
