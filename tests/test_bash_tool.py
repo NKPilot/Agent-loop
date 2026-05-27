@@ -311,3 +311,193 @@ def test_create_bash_tool_returns_decorated_function():
     assert meta.name == "bash"
     assert "shell" not in meta.description.lower() or meta.description  # has description
     assert meta.timeout == 60.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Task 3: PermissionGuard — dangerous command confirmation via EventBus
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ── Test 17: PermissionGuard.check() — SAFE → allow ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_17_permission_guard_safe_allows():
+    """PermissionGuard.check() for SAFE permission returns (True, 'allow')."""
+    from loopai.state_machine.guards import PermissionGuard
+    from loopai.events.bus import EventBus
+    from loopai.tools.types import PermissionLevel
+
+    bus = EventBus()
+    guard = PermissionGuard(bus)
+
+    should_proceed, action = await guard.check(
+        tool_name="bash.ls",
+        tool_args={"path": "."},
+        permission_level=PermissionLevel.SAFE,
+        session_id="test-session-1",
+        step_num=1,
+    )
+    assert should_proceed is True
+    assert action == "allow"
+
+
+# ── Test 18: PermissionGuard.check() — MODERATE → allow ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_18_permission_guard_moderate_allows():
+    """PermissionGuard.check() for MODERATE permission returns (True, 'allow')."""
+    from loopai.state_machine.guards import PermissionGuard
+    from loopai.events.bus import EventBus
+    from loopai.tools.types import PermissionLevel
+
+    bus = EventBus()
+    guard = PermissionGuard(bus)
+
+    should_proceed, action = await guard.check(
+        tool_name="bash.cp",
+        tool_args={"src": "a.txt", "dst": "/home/user/b.txt"},
+        permission_level=PermissionLevel.MODERATE,
+        session_id="test-session-1",
+        step_num=1,
+    )
+    assert should_proceed is True
+    assert action == "allow"
+
+
+# ── Test 19: PermissionGuard.check() — DANGEROUS → confirm_required ─────
+
+
+@pytest.mark.asyncio
+async def test_19_permission_guard_dangerous_requires_confirmation():
+    """PermissionGuard.check() for DANGEROUS publishes event, returns (False, 'confirm_required')."""
+    from loopai.state_machine.guards import PermissionGuard
+    from loopai.events.bus import EventBus
+    from loopai.tools.types import PermissionLevel
+
+    bus = EventBus()
+    guard = PermissionGuard(bus, confirmation_timeout=0.5)  # short timeout for test
+
+    # Subscribe to confirmation_required events before calling check
+    event_queue = await bus.subscribe("confirmation_required")
+
+    # Start check — it will block waiting for confirmation
+    import asyncio
+    check_task = asyncio.create_task(
+        guard.check(
+            tool_name="bash.rm",
+            tool_args={"path": "/etc/dangerous"},
+            permission_level=PermissionLevel.DANGEROUS,
+            session_id="test-session-1",
+            step_num=1,
+        )
+    )
+
+    # Wait for the event to be published
+    event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+    assert event is not None
+    assert event["event_type"] == "confirmation_required"
+    assert event["tool_name"] == "bash.rm"
+    assert "confirmation_id" in event
+
+    # Verify the check hasn't completed yet (still waiting)
+    assert not check_task.done()
+
+    # Cleanup: send response so check_task can complete
+    guard.respond(event["confirmation_id"], approved=False)
+
+    should_proceed, action = await asyncio.wait_for(check_task, timeout=1.0)
+    assert should_proceed is False
+    assert action == "user_denied"
+
+
+# ── Test 20: PermissionGuard.respond(approved=True) → allow ──────────────
+
+
+@pytest.mark.asyncio
+async def test_20_permission_guard_respond_approved():
+    """respond(approved=True) causes check() to return (True, 'allow')."""
+    from loopai.state_machine.guards import PermissionGuard
+    from loopai.events.bus import EventBus
+    from loopai.tools.types import PermissionLevel
+
+    bus = EventBus()
+    guard = PermissionGuard(bus, confirmation_timeout=5.0)
+
+    import asyncio
+    check_task = asyncio.create_task(
+        guard.check(
+            tool_name="bash.rm",
+            tool_args={"path": "/tmp/safe"},
+            permission_level=PermissionLevel.DANGEROUS,
+            session_id="test-session-2",
+            step_num=3,
+        )
+    )
+
+    # Give the event time to publish, then respond
+    await asyncio.sleep(0.05)
+    confirmation_id = "test-session-2_bash.rm_3"
+    guard.respond(confirmation_id, approved=True)
+
+    should_proceed, action = await asyncio.wait_for(check_task, timeout=1.0)
+    assert should_proceed is True
+    assert action == "allow"
+
+
+# ── Test 21: PermissionGuard.respond(approved=False) → user_denied ──────
+
+
+@pytest.mark.asyncio
+async def test_21_permission_guard_respond_denied():
+    """respond(approved=False) causes check() to return (False, 'user_denied')."""
+    from loopai.state_machine.guards import PermissionGuard
+    from loopai.events.bus import EventBus
+    from loopai.tools.types import PermissionLevel
+
+    bus = EventBus()
+    guard = PermissionGuard(bus, confirmation_timeout=5.0)
+
+    import asyncio
+    check_task = asyncio.create_task(
+        guard.check(
+            tool_name="bash.shred",
+            tool_args={"path": "/secret/file"},
+            permission_level=PermissionLevel.DANGEROUS,
+            session_id="test-session-3",
+            step_num=2,
+        )
+    )
+
+    await asyncio.sleep(0.05)
+    confirmation_id = "test-session-3_bash.shred_2"
+    guard.respond(confirmation_id, approved=False)
+
+    should_proceed, action = await asyncio.wait_for(check_task, timeout=1.0)
+    assert should_proceed is False
+    assert action == "user_denied"
+
+
+# ── Test 22: PermissionGuard timeout → auto-deny ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_22_permission_guard_timeout_auto_denies():
+    """PermissionGuard.check() times out if no response within confirmation_timeout."""
+    from loopai.state_machine.guards import PermissionGuard
+    from loopai.events.bus import EventBus
+    from loopai.tools.types import PermissionLevel
+
+    bus = EventBus()
+    guard = PermissionGuard(bus, confirmation_timeout=0.2)  # very short timeout
+
+    should_proceed, action = await guard.check(
+        tool_name="bash.rm",
+        tool_args={"path": "/some/file"},
+        permission_level=PermissionLevel.DANGEROUS,
+        session_id="test-session-4",
+        step_num=1,
+    )
+    assert should_proceed is False
+    assert action == "timeout"
