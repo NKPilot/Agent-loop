@@ -166,6 +166,9 @@ class ReActFSM:
                 add_kwargs["content"] = content
             if tool_calls:
                 add_kwargs["tool_calls"] = tool_calls
+            reasoning = response.get("reasoning_content")
+            if reasoning:
+                add_kwargs["reasoning_content"] = reasoning
             session.messages.append(add_kwargs)
 
             # Determine next state

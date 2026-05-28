@@ -75,6 +75,7 @@ class LLMClient:
 
         # Accumulators
         content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_calls_acc: dict[int, dict[str, Any]] = {}  # index -> {name, id, args_str}
         tool_starts_emitted: set[int] = set()
 
@@ -97,6 +98,11 @@ class LLMClient:
                                 "content_delta": delta.content,
                             },
                         )
+
+                    # Reasoning content (DeepSeek thinking mode / o1-style)
+                    rc = getattr(delta, "reasoning_content", None)
+                    if rc and isinstance(rc, str):
+                        reasoning_parts.append(rc)
 
                     # Tool calls
                     if delta.tool_calls:
@@ -169,6 +175,7 @@ class LLMClient:
                 "content": full_content,
                 "tool_calls": tool_calls,
                 "role": "assistant",
+                "reasoning_content": "".join(reasoning_parts) or None,
             }
 
         except Exception as exc:
