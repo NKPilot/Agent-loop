@@ -167,7 +167,7 @@ class TestToolConfigDefaults:
 
         config = load_config()
 
-        assert config.tool_working_dir == "/home/user"
+        assert config.tool_working_dir == "."
         assert config.tool_timeout == 60.0
         assert config.confirmation_timeout == 120.0
 
