@@ -62,7 +62,7 @@
 **Plans:**
 - [x] 03-01-PLAN.md — Token 计数 + 溢出文件 + 事件 Schema：TokenCounter（tiktoken）、ToolExecutor 溢出文件写入、ContextCompacted/TokenWarning 事件类型
 - [x] 03-02-PLAN.md — 上下文压缩 + Token 守卫：ContextCompressor 滑动窗口摘要、TokenGuard 阈值检测
-- [ ] 03-03-PLAN.md — FSM 集成 + 追加式固化：TokenGuard/Compressor/溢出文件集成到 ReActFSM 的 _handle_reason 和 _handle_act
+- [x] 03-03-PLAN.md — FSM 集成 + 追加式固化：TokenGuard/Compressor/溢出文件集成到 ReActFSM 的 _handle_reason 和 _handle_act
 
 ### 阶段 4: 韧性与恢复
 **目标**: 检查点、循环检测升级、失败注册表、守卫管道、分层恢复、熔断器，确保 agent 运行的可靠性
@@ -97,6 +97,6 @@
 |------|----------|------|----------|
 | 1. Agent 核心循环 | 5/5 | 完成 | - |
 | 2. 工具系统与业务验证 | 4/4 | 完成 | - |
-| 3. 上下文管理 | 2/3 | 执行中 | - |
+| 3. 上下文管理 | 3/3 | 完成 | 2026-05-28 |
 | 4. 韧性与恢复 | 0/0 | 未开始 | - |
 | 5. 可观测性与 Web 前端 | 0/0 | 未开始 | - |
