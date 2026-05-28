@@ -180,6 +180,42 @@ class ConfirmationResponse(EventBase):
     approved: bool
 
 
+# ── Context management events ────────────────────────────────────────
+
+
+class ContextCompacted(EventBase):
+    """Published when context compression reduces the token count.
+
+    The compression engine fires this event after a successful compression,
+    recording how many tokens were freed and how many conversation rounds
+    were summarized.
+    """
+
+    event_type: Literal["context_compacted"] = "context_compacted"
+    step_num: int
+    tokens_before: int
+    tokens_after: int
+    tokens_saved: int
+    rounds_preserved: int
+    summary_message_count: int
+
+
+class TokenWarning(EventBase):
+    """Published when token usage approaches the context window limit.
+
+    The TokenGuard fires this event when usage reaches a configurable
+    threshold (typically 75%), allowing consumers to preview the situation
+    or trigger compression.
+    """
+
+    event_type: Literal["token_warning"] = "token_warning"
+    step_num: int
+    token_count: int
+    max_tokens: int
+    used_pct: float
+    action: str
+
+
 # ── Discriminated union type ────────────────────────────────────────
 
 Event = Annotated[
@@ -197,6 +233,8 @@ Event = Annotated[
     | LoopDetected
     | Error
     | ConfirmationRequired
-    | ConfirmationResponse,
+    | ConfirmationResponse
+    | ContextCompacted
+    | TokenWarning,
     Field(discriminator="event_type"),
 ]
