@@ -2,16 +2,16 @@
 # ============================================================================
 # setup_demo_scenario.sh — 磁盘诊断预设场景创建脚本
 #
-# 在 /tmp/loopai-demo/ 沙箱内创建模拟的日志、缓存、临时文件和备份文件，
+# 在项目 .sandbox/ 沙箱内创建模拟的日志、缓存、临时文件和备份文件，
 # 用于磁盘空间诊断与清理的端到端验证（D-15, D-16）。
 #
-# 幂等性: 每次运行前先清理 /tmp/loopai-demo/ 再重建，确保结果一致。
+# 幂等性: 每次运行前先清理沙箱再重建，确保结果一致。
 #
 # 用法:
-#     bash scripts/setup_demo_scenario.sh
+#     bash scripts/setup_demo_scenario.sh [沙箱目录，默认 .sandbox]
 #
 # 场景结构:
-#     /tmp/loopai-demo/
+#     .sandbox/
 #     ├── logs/
 #     │   ├── app.log        (50MB,  模拟应用日志)
 #     │   ├── nginx/
@@ -31,7 +31,7 @@
 
 set -euo pipefail
 
-SANDBOX="/tmp/loopai-demo"
+SANDBOX="${1:-.sandbox}"
 
 echo "=== 磁盘诊断预设场景设置 ==="
 echo "沙箱目录: ${SANDBOX}"

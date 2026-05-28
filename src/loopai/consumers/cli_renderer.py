@@ -342,10 +342,12 @@ class CLIAgentRenderer:
         console = Console()
         live = Live(
             self.build_renderable(),
-            refresh_per_second=10,
-            transient=True,
+            refresh_per_second=4,  # 降低刷新频率减少闪烁
+            transient=False,
             console=console,
+            auto_refresh=True,
         )
+        last_update = 0.0
         with live:
             while True:
                 event = await self._queue.get()
@@ -354,7 +356,14 @@ class CLIAgentRenderer:
                     break
 
                 self._handle_event(event)
-                live.update(self.build_renderable())
+
+                # 节流：最少 80ms 间隔，避免 token 流导致频繁重绘闪烁
+                now = asyncio.get_event_loop().time()
+                event_type = event.get("event_type", "")
+                is_token = event_type == "llm_token"
+                if not is_token or (now - last_update) > 0.08:
+                    live.update(self.build_renderable())
+                    last_update = now
 
                 # Handle confirmation_required: pause Live, show prompt,
                 # get user input, resume Live.
