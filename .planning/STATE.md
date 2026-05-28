@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-05-28T06:15:00.000Z"
+last_updated: "2026-05-28T06:23:00.000Z"
 progress:
-  total_phases: 5
+  total_phases: 3
   completed_phases: 2
   total_plans: 12
-  completed_plans: 11
-  percent: 91
+  completed_plans: 12
+  percent: 100
 ---
 
 # 项目状态
@@ -24,17 +24,17 @@ progress:
 ## 当前位置
 
 阶段: 3 / 5 (上下文管理)
-计划: 1 / 3 (完成)
+计划: 2 / 3 (完成)
 状态: 执行中
-最近活动: 2026-05-28 — 03-01 Token 计数 + 溢出文件 + 事件 Schema 完成
+最近活动: 2026-05-28 — 03-02 上下文压缩器 + Token 预算守卫 完成
 
-进度: [█████████░] 91%
+进度: [██████████] 100%
 
 ## 性能指标
 
 **速度:**
 
-- 已完成计划数: 11
+- 已完成计划数: 12
 - 平均耗时: — 
 - 总执行时间: —
 
@@ -44,12 +44,12 @@ progress:
 |------|--------|--------|-----------|
 | 1. Agent 核心循环 | 5 | — | — |
 | 2. 工具系统 | 4 | — | — |
-| 3. 上下文管理 | 1 (已完成) | 14min | 14min |
+| 3. 上下文管理 | 2 (已完成) | 22min | 11min |
 
 **近期趋势:**
 
-- 最近执行: 03-01-Token 计数 + 溢出文件 + 事件 Schema 扩展 (14min)
-- 趋势: Phase 3 开始执行
+- 最近执行: 03-02-上下文压缩器 + Token 预算守卫 (8min)
+- 趋势: Phase 3 推进中，03-03 FSM 集成为下一计划
 
 *每次计划完成后更新*
 
@@ -66,6 +66,9 @@ progress:
 - [03-01]: 使用 tiktoken cl100k_base 编码做近似计数（D-03），跨模型误差 <5%
 - [03-01]: 溢出文件路径 `.sandbox/overflow/{session_id}_{tool_call_id}_{timestamp}.txt`
 - [03-01]: 溢出文件仅写入磁盘，FSM._handle_act 负责在注入上下文时替换为引用
+- [03-02]: 保留最近 3 轮完整对话（Claude's Discretion），不足 3 轮时不压缩
+- [03-02]: 摘要消息使用 role=system + [Compressed Summary] 前缀标记（T-03-02-01/02）
+- [03-02]: _find_round_cutoff 从末端反向遍历：只计数 assistant 消息 + tool_calls 为对话轮
 
 ### 待办事项
 
@@ -84,5 +87,5 @@ progress:
 ## 会话连续性
 
 上次会话: 2026-05-28
-停止于: 03-01 Token 计数 + 溢出文件 + 事件 Schema 完成
-恢复文件: .planning/phases/03-context-management/03-01-SUMMARY.md
+停止于: 03-02 上下文压缩器 + Token 预算守卫 完成
+恢复文件: .planning/phases/03-context-management/03-02-SUMMARY.md
