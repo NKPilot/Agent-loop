@@ -21,15 +21,15 @@ from loopai.tools.executor import ToolExecutor
 from loopai.tools.registry import ToolRegistry
 from loopai.tools.types import PermissionLevel
 
-SANDBOX = "/tmp/loopai-demo"
+SANDBOX = os.environ.get("LOOPAI_TEST_SANDBOX", ".sandbox")
 
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_demo():
     """模块级夹具：运行预设场景脚本，测试结束后清理沙箱。"""
-    subprocess.run(["bash", "scripts/setup_demo_scenario.sh"], check=True)
+    subprocess.run(["bash", "scripts/setup_demo_scenario.sh", SANDBOX], check=True)
     yield
-    subprocess.run(["rm", "-rf", SANDBOX], check=False)
+    subprocess.run(["rm", "-rf", os.path.abspath(SANDBOX)], check=False)
 
 
 @pytest.fixture
