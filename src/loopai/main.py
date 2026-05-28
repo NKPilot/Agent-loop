@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 from loopai.config import add_cli_args, load_config
 from loopai.consumers.cli_renderer import CLIAgentRenderer
 from loopai.consumers.jsonl_logger import JSONLLogger
+from loopai.context.compressor import ContextCompressor
+from loopai.context.token_counter import TokenCounter
 from loopai.events.bus import EventBus
 from loopai.llm.client import LLMClient
 from loopai.session.context import Session
@@ -24,6 +26,7 @@ from loopai.state_machine.guards import (
     LoopDetector,
     MessageValidator,
     PermissionGuard,
+    TokenGuard,
 )
 from loopai.tools.bash import create_bash_tool
 from loopai.tools.executor import ToolExecutor
@@ -94,9 +97,16 @@ async def run_session(
     bash_fn = create_bash_tool(working_dir=config.tool_working_dir)
     registry.register(bash_fn)
 
+    # ── Wire up context management (Phase 3) ──────────────────────────
+    token_counter = TokenCounter()
+    token_guard = TokenGuard(token_counter, window_size=config.context_window)
+    compressor = ContextCompressor(token_counter, window_size=config.context_window)
+
     fsm = ReActFSM(
         client, bus, budget_guard, loop_detector, message_validator,
         registry, executor, permission_guard,
+        token_guard=token_guard,
+        compressor=compressor,
     )
 
     # ── Start consumers ──────────────────────────────────────────────

@@ -37,6 +37,7 @@ class AgentConfig(BaseModel):
     tool_working_dir: str = "."
     tool_timeout: float = 60.0
     confirmation_timeout: float = 120.0
+    context_window: int = 128000
 
     @model_validator(mode="after")
     def _validate_api_key_not_empty(self) -> AgentConfig:
