@@ -164,6 +164,7 @@ class TestToolConfigDefaults:
     def test_tool_config_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """AgentConfig() 默认值包含工具配置字段。"""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("LOOPAI_TOOL_WORKING_DIR", raising=False)
 
         config = load_config()
 
