@@ -27,7 +27,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -36,8 +39,10 @@ from loopai.tools.errors import classify_error
 from loopai.tools.registry import ToolRegistry
 from loopai.tools.types import ErrorCategory, ToolMetadata, ToolResult
 
-# Threshold for result truncation (100 KB)
-_MAX_RESULT_BYTES = 100 * 1024
+# Overflow threshold for tool output (80K characters)
+_OVERFLOW_THRESHOLD_CHARS = 80 * 1024
+# Directory for overflow files
+_OVERFLOW_DIR = ".sandbox/overflow"
 
 
 class ToolExecutor:
@@ -62,7 +67,8 @@ class ToolExecutor:
 
     # ── Public API ──────────────────────────────────────────────────
 
-    async def execute(self, tool_name: str, args: dict) -> ToolResult:
+    async def execute(self, tool_name: str, args: dict,
+                      session_id: str = "", tool_call_id: str = "") -> ToolResult:
         """Execute a tool by name with the given arguments.
 
         This is the main entry point.  It handles metadata lookup, argument
@@ -72,6 +78,8 @@ class ToolExecutor:
         Args:
             tool_name: Full tool name (e.g. ``"bash.df"``).
             args: Raw argument dict from the LLM (untrusted boundary).
+            session_id: Session identifier for overflow file naming.
+            tool_call_id: Tool call identifier for overflow file naming.
 
         Returns:
             A :class:`ToolResult` with success/error status and timing info.
@@ -101,18 +109,22 @@ class ToolExecutor:
             validated_args = dict(args)
 
         # Step 2: Execute with retry (D-12, D-13)
-        return await self._execute_with_retry(metadata, validated_args)
+        return await self._execute_with_retry(metadata, validated_args,
+                                               session_id, tool_call_id)
 
     # ── Retry loop ──────────────────────────────────────────────────
 
     async def _execute_with_retry(
-        self, metadata: ToolMetadata, validated_args: dict
+        self, metadata: ToolMetadata, validated_args: dict,
+        session_id: str = "", tool_call_id: str = "",
     ) -> ToolResult:
         """Execute the tool with retry on transient errors.
 
         Args:
             metadata: Tool metadata (contains retry config).
             validated_args: Arguments that have passed Pydantic validation.
+            session_id: Session identifier for overflow file naming.
+            tool_call_id: Tool call identifier for overflow file naming.
 
         Returns:
             A :class:`ToolResult` for the final outcome.
@@ -122,7 +134,8 @@ class ToolExecutor:
 
         for attempt in range(retry_config.max_attempts):
             try:
-                result = await self._execute_once(metadata, validated_args)
+                result = await self._execute_once(metadata, validated_args,
+                                                   session_id, tool_call_id)
                 # Success — return immediately
                 return result
             except Exception as exc:
@@ -165,13 +178,16 @@ class ToolExecutor:
     # ── Single execution attempt ────────────────────────────────────
 
     async def _execute_once(
-        self, metadata: ToolMetadata, validated_args: dict
+        self, metadata: ToolMetadata, validated_args: dict,
+        session_id: str = "", tool_call_id: str = "",
     ) -> ToolResult:
         """Execute the tool function once with timeout and result wrapping.
 
         Args:
             metadata: Tool metadata (contains timeout, func_ref).
             validated_args: Validated argument dict.
+            session_id: Session identifier for overflow file naming.
+            tool_call_id: Tool call identifier for overflow file naming.
 
         Returns:
             A :class:`ToolResult` for this single attempt.
@@ -209,17 +225,16 @@ class ToolExecutor:
 
         duration_ms = (time.monotonic() - start) * 1000
 
-        # Truncate large string results (> 100 KB)
+        # Write overflow file for large string results (> 80K characters)
         truncated = False
         overflow_file: str | None = None
         data: Any = raw_result
 
-        if isinstance(data, str) and len(data.encode("utf-8")) > _MAX_RESULT_BYTES:
-            truncated = True
-            # Truncate to ~100 KB while keeping valid UTF-8
-            encoded = data.encode("utf-8")[:_MAX_RESULT_BYTES]
-            data = encoded.decode("utf-8", errors="replace")
-            overflow_file = None  # Could write to temp file in future
+        if isinstance(data, str) and len(data) > _OVERFLOW_THRESHOLD_CHARS:
+            overflow_file = self._write_overflow_file(
+                metadata.name, session_id, tool_call_id, data
+            )
+            # data 保持完整 — FSM._handle_act 负责在注入上下文时替换为引用
 
         return ToolResult.success(
             data=data,
@@ -227,3 +242,34 @@ class ToolExecutor:
             truncated=truncated,
             overflow_file=overflow_file,
         )
+
+    # ── Overflow file writing ─────────────────────────────────────────
+
+    def _write_overflow_file(
+        self, tool_name: str, session_id: str, tool_call_id: str, content: str
+    ) -> str:
+        """Write tool output to an overflow file when it exceeds the threshold.
+
+        File path format: ``.sandbox/overflow/{session_id}_{tool_call_id}_{timestamp}.txt``
+        If ``session_id`` is empty, the file path falls back to ``{timestamp}.txt``.
+
+        Args:
+            tool_name: Name of the tool (currently unused in the path).
+            session_id: Session identifier for the file name.
+            tool_call_id: Tool call identifier for the file name.
+            content: The full tool output string to write.
+
+        Returns:
+            The absolute path string to the written overflow file.
+        """
+        os.makedirs(_OVERFLOW_DIR, exist_ok=True)
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        if session_id:
+            filename = f"{session_id}_{tool_call_id}_{timestamp}.txt"
+        else:
+            filename = f"{timestamp}.txt"
+
+        file_path = str(Path(_OVERFLOW_DIR) / filename)
+        Path(file_path).write_text(content, encoding="utf-8")
+        return file_path

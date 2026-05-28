@@ -631,3 +631,87 @@ async def test_executor_fatal_error_reraises():
 
     with pytest.raises(SystemExit):
         await executor.execute("oom", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Task 4: Overflow file tests (CTX-04)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_overflow_file_created():
+    """Tool output >80K chars creates overflow file and sets overflow_file path."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+
+    registry = ToolRegistry()
+
+    @tool(name="big_output")
+    def big_output() -> str:
+        """Produces output >80K characters."""
+        return "x" * 85_000
+
+    registry.register(big_output)
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute("big_output", {},
+                                     session_id="sess_abc", tool_call_id="call_001")
+    assert result.status == "success"
+    assert result.overflow_file is not None, "overflow_file should be set for >80K output"
+    assert result.data == "x" * 85_000, "data should remain intact"
+    # Verify file exists on disk
+    import os
+    assert os.path.exists(result.overflow_file), f"Overflow file not found: {result.overflow_file}"
+
+
+@pytest.mark.asyncio
+async def test_no_overflow_below_threshold():
+    """Tool output <80K chars leaves overflow_file as None."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+
+    registry = ToolRegistry()
+
+    @tool(name="small_output")
+    def small_output() -> str:
+        """Produces output <80K characters."""
+        return "Hello, small world!"
+
+    registry.register(small_output)
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute("small_output", {})
+    assert result.status == "success"
+    assert result.overflow_file is None, "overflow_file should be None for <80K output"
+
+
+@pytest.mark.asyncio
+async def test_overflow_file_content():
+    """Overflow file content matches the original tool output exactly."""
+    from loopai.tools.decorator import tool
+    from loopai.tools.registry import ToolRegistry
+    from loopai.tools.executor import ToolExecutor
+
+    registry = ToolRegistry()
+    expected_content = "A" * 82_000 + "B" * 82_000  # ~164K chars
+
+    @tool(name="large_content")
+    def large_content() -> str:
+        """Produces output >80K characters."""
+        return expected_content
+
+    registry.register(large_content)
+    executor = ToolExecutor(registry)
+
+    result = await executor.execute("large_content", {},
+                                     session_id="sess_content", tool_call_id="call_002")
+    assert result.overflow_file is not None
+
+    # Read the overflow file and verify content matches
+    from pathlib import Path
+    file_content = Path(result.overflow_file).read_text(encoding="utf-8")
+    assert file_content == expected_content, "Overflow file content does not match original output"
+    # Verify data is still intact on the result
+    assert result.data == expected_content
