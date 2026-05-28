@@ -17,6 +17,7 @@ from loopai.session.context import AgentState
 from loopai.state_machine.guards import ValidationError
 
 if TYPE_CHECKING:
+    from loopai.context.compressor import ContextCompressor
     from loopai.events.bus import EventBus
     from loopai.llm.client import LLMClient
     from loopai.session.context import Session
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
         LoopDetector,
         MessageValidator,
         PermissionGuard,
+        TokenGuard,
     )
     from loopai.tools.executor import ToolExecutor
     from loopai.tools.registry import ToolRegistry
@@ -61,6 +63,9 @@ class ReActFSM:
         registry: ToolRegistry,
         executor: ToolExecutor,
         permission_guard: PermissionGuard,
+        *,
+        token_guard: TokenGuard | None = None,
+        compressor: ContextCompressor | None = None,
     ) -> None:
         self.client = client
         self.bus = bus
@@ -70,6 +75,8 @@ class ReActFSM:
         self.registry = registry
         self.executor = executor
         self.permission_guard = permission_guard
+        self.token_guard = token_guard
+        self.compressor = compressor
         self._exit_reason = "completed"
         self._last_act_failed = False
 
@@ -139,6 +146,44 @@ class ReActFSM:
         try:
             # Guard: validate message structure before LLM call
             self.message_validator.validate(session.messages)
+
+            # TokenGuard: check token budget before LLM call (Phase 3)
+            if self.token_guard is not None:
+                tg_action, token_count, threshold_tokens = self.token_guard.check(session.messages)
+                if tg_action == "compress" and self.compressor is not None:
+
+                    async def _summary_fn(old_msgs: list[dict]) -> str:
+                        summary_prompt = self.compressor._build_summary_prompt(old_msgs)
+                        summary_response = await self.client.complete(
+                            [{"role": "system", "content": summary_prompt}],
+                            tools=None,
+                            session_id=session.session_id,
+                            step_num=step_num,
+                        )
+                        return summary_response.get("content", "")
+
+                    compressed, was_compressed, meta = await self.compressor.check_and_compress(
+                        session.messages, _summary_fn
+                    )
+                    if was_compressed:
+                        # Replace session messages with compressed version (append-only by reference)
+                        session.messages.clear()
+                        session.messages.extend(compressed)
+
+                        # Publish context_compacted event
+                        await self.bus.publish(
+                            "context_compacted",
+                            {
+                                "event_type": "context_compacted",
+                                "session_id": session.session_id,
+                                "step_num": step_num,
+                                "tokens_before": meta["tokens_before"],
+                                "tokens_after": meta["tokens_after"],
+                                "tokens_saved": meta["tokens_saved"],
+                                "rounds_preserved": meta.get("rounds_preserved", 0),
+                                "summary_message_count": meta.get("summary_message_count", 0),
+                            },
+                        )
 
             # Guard: budget check (may inject system messages)
             should_continue, messages, action = self.budget_guard.check(
@@ -358,16 +403,44 @@ class ReActFSM:
                 },
             )
 
-            # Step 5: Inject tool_result into session messages
-            tool_content = (
-                str(result.data) if result.data is not None
-                else (result.error_message or "")
-            )
+            # Step 5: Inject tool_result into session messages with overflow support (Phase 3, D-05)
+            if result.overflow_file and result.data is not None:
+                # Calculate size for the reference
+                data_str = str(result.data)
+                size_kb = len(data_str.encode("utf-8")) // 1024
+                tool_content = (
+                    f"[工具输出已保存至: {result.overflow_file} ({size_kb}KB)]\n"
+                    f"如需查看完整内容，请使用 Bash 工具读取该文件。\n"
+                    f"--- 预览 (前 500 字符) ---\n"
+                    f"{data_str[:500]}"
+                )
+            else:
+                tool_content = (
+                    str(result.data) if result.data is not None
+                    else (result.error_message or "")
+                )
             session.add_message(
                 "tool",
                 content=tool_content,
                 tool_call_id=tool_call_id,
             )
+
+            # Publish overflow_written event
+            if result.overflow_file:
+                data_str = str(result.data) if result.data else ""
+                size_kb = len(data_str.encode("utf-8")) // 1024
+                await self.bus.publish(
+                    "overflow_written",
+                    {
+                        "event_type": "overflow_written",
+                        "session_id": session.session_id,
+                        "step_num": step_num,
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "file_path": result.overflow_file,
+                        "size_kb": size_kb,
+                    },
+                )
 
             if result.is_error:
                 any_blocked = True
