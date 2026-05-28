@@ -10,6 +10,7 @@ from loopai.events.schemas import (
     BudgetWarning,
     ConfirmationRequired,
     ConfirmationResponse,
+    ContextCompacted,
     Error,
     Event,
     LLMContentDone,
@@ -18,6 +19,7 @@ from loopai.events.schemas import (
     SessionEnd,
     StepEnd,
     StepStart,
+    TokenWarning,
     ToolCallArgs,
     ToolCallDone,
     ToolCallStart,
@@ -79,6 +81,23 @@ class TestEventDiscriminatedUnion:
         assert parsed.event_type == "step_start"
         assert parsed.session_id == "sess-1"
 
+    def test_context_compacted_in_union(self):
+        event = ContextCompacted(
+            session_id="s1",
+            step_num=5,
+            tokens_before=12000,
+            tokens_after=6000,
+            tokens_saved=6000,
+            rounds_preserved=3,
+            summary_message_count=10,
+        )
+        data = event.model_dump()
+        ta = TypeAdapter(Event)
+        parsed = ta.validate_python(data)
+        assert isinstance(parsed, ContextCompacted)
+        assert parsed.step_num == 5
+        assert parsed.tokens_saved == 6000
+
 
 class TestAllEventsUniqueType:
     """Verify all 13 event_type values are unique."""
@@ -98,6 +117,8 @@ class TestAllEventsUniqueType:
             BudgetExhausted,
             LoopDetected,
             Error,
+            ContextCompacted,
+            TokenWarning,
         ]
         # Instantiate each with minimal required fields to get event_type
         event_types = set()
@@ -138,11 +159,22 @@ class TestAllEventsUniqueType:
             if cls is Error:
                 kwargs["error_type"] = "RuntimeError"
                 kwargs["message"] = "test error"
+            if cls is ContextCompacted:
+                kwargs["tokens_before"] = 10000
+                kwargs["tokens_after"] = 5000
+                kwargs["tokens_saved"] = 5000
+                kwargs["rounds_preserved"] = 3
+                kwargs["summary_message_count"] = 10
+            if cls is TokenWarning:
+                kwargs["token_count"] = 96000
+                kwargs["max_tokens"] = 128000
+                kwargs["used_pct"] = 0.75
+                kwargs["action"] = "compress"
 
             event = cls(**kwargs)
             event_types.add(event.event_type)
 
-        assert len(event_types) == 13, f"Expected 13 unique event types, got {len(event_types)}: {event_types}"
+        assert len(event_types) == 15, f"Expected 15 unique event types, got {len(event_types)}: {event_types}"
 
 
 class TestJsonSerialization:
@@ -191,6 +223,23 @@ class TestJsonSerialization:
                 step_num=1,
                 error_type="ValueError",
                 message="test error",
+            ),
+            ContextCompacted(
+                session_id="sess-1",
+                step_num=5,
+                tokens_before=12000,
+                tokens_after=6000,
+                tokens_saved=6000,
+                rounds_preserved=3,
+                summary_message_count=10,
+            ),
+            TokenWarning(
+                session_id="sess-1",
+                step_num=3,
+                token_count=96000,
+                max_tokens=128000,
+                used_pct=0.75,
+                action="compress",
             ),
         ]
 
@@ -271,6 +320,88 @@ class TestConfirmationResponseCreation:
         assert event.event_type == "confirmation_response"
 
 
+class TestContextCompactedCreation:
+    """Verify ContextCompacted construction and round-trip."""
+
+    def test_context_compacted_creation(self):
+        event = ContextCompacted(
+            session_id="s1",
+            step_num=5,
+            tokens_before=12000,
+            tokens_after=6000,
+            tokens_saved=6000,
+            rounds_preserved=3,
+            summary_message_count=10,
+        )
+        assert event.event_type == "context_compacted"
+        assert event.session_id == "s1"
+        assert event.step_num == 5
+        assert event.tokens_before == 12000
+        assert event.tokens_after == 6000
+        assert event.tokens_saved == 6000
+        assert event.rounds_preserved == 3
+        assert event.summary_message_count == 10
+        assert isinstance(event.timestamp, str)
+        assert "T" in event.timestamp
+
+    def test_context_compacted_round_trip(self):
+        event = ContextCompacted(
+            session_id="s2",
+            step_num=10,
+            tokens_before=20000,
+            tokens_after=8000,
+            tokens_saved=12000,
+            rounds_preserved=5,
+            summary_message_count=15,
+        )
+        data = event.model_dump()
+        ta = TypeAdapter(Event)
+        parsed = ta.validate_python(data)
+        assert isinstance(parsed, ContextCompacted)
+        assert parsed.tokens_before == 20000
+        assert parsed.tokens_saved == 12000
+        assert parsed.rounds_preserved == 5
+
+
+class TestTokenWarningCreation:
+    """Verify TokenWarning construction and round-trip."""
+
+    def test_token_warning_creation(self):
+        event = TokenWarning(
+            session_id="s1",
+            step_num=3,
+            token_count=96000,
+            max_tokens=128000,
+            used_pct=0.75,
+            action="compress",
+        )
+        assert event.event_type == "token_warning"
+        assert event.session_id == "s1"
+        assert event.step_num == 3
+        assert event.token_count == 96000
+        assert event.max_tokens == 128000
+        assert event.used_pct == 0.75
+        assert event.action == "compress"
+        assert isinstance(event.timestamp, str)
+
+    def test_token_warning_round_trip(self):
+        event = TokenWarning(
+            session_id="s2",
+            step_num=7,
+            token_count=50000,
+            max_tokens=100000,
+            used_pct=0.50,
+            action="ok",
+        )
+        data = event.model_dump()
+        ta = TypeAdapter(Event)
+        parsed = ta.validate_python(data)
+        assert isinstance(parsed, TokenWarning)
+        assert parsed.token_count == 50000
+        assert parsed.max_tokens == 100000
+        assert parsed.action == "ok"
+
+
 class TestNewEventsDiscriminatedUnion:
     """Verify new events can be deserialized via the Event TypeAdapter."""
 
@@ -307,7 +438,7 @@ class TestNewEventsDiscriminatedUnion:
 class TestUpdatedEventTypeCount:
     """Verify all event_type values are unique (now 15 events)."""
 
-    def test_all_events_have_unique_type_15(self):
+    def test_all_events_have_unique_type_17(self):
         event_classes = [
             StepStart,
             StepEnd,
@@ -324,6 +455,8 @@ class TestUpdatedEventTypeCount:
             Error,
             ConfirmationRequired,
             ConfirmationResponse,
+            ContextCompacted,
+            TokenWarning,
         ]
         event_types = set()
         for cls in event_classes:
@@ -371,8 +504,19 @@ class TestUpdatedEventTypeCount:
             if cls is ConfirmationResponse:
                 kwargs["confirmation_id"] = "c1"
                 kwargs["approved"] = True
+            if cls is ContextCompacted:
+                kwargs["tokens_before"] = 10000
+                kwargs["tokens_after"] = 5000
+                kwargs["tokens_saved"] = 5000
+                kwargs["rounds_preserved"] = 3
+                kwargs["summary_message_count"] = 10
+            if cls is TokenWarning:
+                kwargs["token_count"] = 96000
+                kwargs["max_tokens"] = 128000
+                kwargs["used_pct"] = 0.75
+                kwargs["action"] = "compress"
 
             event = cls(**kwargs)
             event_types.add(event.event_type)
 
-        assert len(event_types) == 15, f"Expected 15 unique event types, got {len(event_types)}: {event_types}"
+        assert len(event_types) == 17, f"Expected 17 unique event types, got {len(event_types)}: {event_types}"
