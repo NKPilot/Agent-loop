@@ -120,7 +120,19 @@ class EventBus:
         Sends a None sentinel to each subscriber queue to signal that
         no more events will be published. Consumers should exit their
         processing loop when they receive None.
+
+        Uses put_nowait to avoid blocking on full queues. If a queue is
+        full, the sentinel replaces the oldest item so the consumer can
+        still shut down.
         """
         for queues in self._subscribers.values():
             for queue in queues:
-                await queue.put(None)
+                try:
+                    queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    # Queue is full — drain one item, then insert sentinel
+                    try:
+                        queue.get_nowait()
+                        queue.put_nowait(None)
+                    except asyncio.QueueEmpty:
+                        pass
