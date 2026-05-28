@@ -34,7 +34,7 @@ class AgentConfig(BaseModel):
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4o"
     max_steps: int = 15
-    tool_working_dir: str = "/home/user"
+    tool_working_dir: str = "."
     tool_timeout: float = 60.0
     confirmation_timeout: float = 120.0
 
@@ -121,7 +121,7 @@ def load_config(cli_args: argparse.Namespace | None = None) -> AgentConfig:
     max_steps = int(max_steps_str) if max_steps_str else 15
 
     tool_working_dir = _get_cli_or_env(
-        cli, "tool_working_dir", "LOOPAI_TOOL_WORKING_DIR", "/home/user"
+        cli, "tool_working_dir", "LOOPAI_TOOL_WORKING_DIR", "."
     )
     tool_timeout_str = _get_cli_or_env(
         cli, "tool_timeout", "LOOPAI_TOOL_TIMEOUT", "60.0"
