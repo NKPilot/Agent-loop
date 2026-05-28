@@ -8,7 +8,10 @@ from __future__ import annotations
 import argparse
 import os
 
+from dotenv import load_dotenv
 from pydantic import BaseModel, SecretStr, model_validator
+
+load_dotenv()
 
 
 class AgentConfig(BaseModel):
