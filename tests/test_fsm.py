@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from loopai.context.compressor import ContextCompressor
 from loopai.events.bus import EventBus
 from loopai.session.context import AgentState, Session
 from loopai.state_machine.guards import (
@@ -880,3 +881,389 @@ async def test_fsm_injects_timeout_on_confirmation_timeout():
         m for m in tool_msgs if "超时" in (m.get("content") or "")
     ]
     assert len(timeout_msgs) >= 1
+
+
+# ── Phase 3 Tests: Context Management ────────────────────────────────────
+
+
+def _make_fsm_with_context(
+    client, bus, budget_guard, loop_detector, message_validator,
+    token_guard=None, compressor=None,
+):
+    """Helper: create ReActFSM with context management components."""
+    from loopai.state_machine.fsm import ReActFSM
+
+    registry = MagicMock()
+    executor = MagicMock()
+    executor.execute = AsyncMock(
+        return_value=ToolResult.success(data="output", duration_ms=10.0)
+    )
+    permission_guard = MagicMock()
+    permission_guard.check = AsyncMock(return_value=(True, "allow"))
+
+    meta = ToolMetadata(
+        name="bash",
+        description="Execute bash commands",
+        permission_level=PermissionLevel.SAFE,
+        timeout=60.0,
+    )
+    registry.get.return_value = meta
+    registry.get_schemas.return_value = [meta.to_openai_schema()]
+
+    fsm = ReActFSM(
+        client, bus, budget_guard, loop_detector, message_validator,
+        registry, executor, permission_guard,
+        token_guard=token_guard,
+        compressor=compressor,
+    )
+    return fsm, registry, executor, permission_guard
+
+
+class TestContextManagement:
+    """Context management integration tests for ReActFSM."""
+
+    @pytest.mark.asyncio
+    async def test_token_guard_triggers_compression(self):
+        """TokenGuard returns 'compress' → compressor runs → messages replaced + event."""
+        bus = EventBus()
+        session = Session()
+        session.add_message("system", content="You are helpful.")
+        session.add_message("user", content="Hello")
+
+        compressed_msgs = [
+            {"role": "system", "content": "[Compressed Summary] Old conversation"},
+            {"role": "user", "content": "Hello"},
+        ]
+        meta = {
+            "tokens_before": 100000,
+            "tokens_after": 50000,
+            "tokens_saved": 50000,
+            "rounds_preserved": 3,
+            "summary_message_count": 1,
+            "action": "compressed",
+        }
+
+        client = MagicMock()
+        client.complete = AsyncMock(
+            return_value={"content": "Final answer", "tool_calls": []}
+        )
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        token_guard = MagicMock()
+        token_guard.check = MagicMock(return_value=("compress", 100000, 96000))
+
+        compressor = MagicMock()
+        compressor.check_and_compress = AsyncMock(
+            return_value=(compressed_msgs, True, meta)
+        )
+
+        fsm = _make_fsm_with_context(
+            client, bus, budget_guard, loop_detector, message_validator,
+            token_guard=token_guard, compressor=compressor,
+        )[0]
+
+        result = await fsm.run(session)
+
+        # Compressor was called
+        compressor.check_and_compress.assert_called_once()
+
+        # Session messages contain compressed version
+        assert result.messages[0] == compressed_msgs[0]
+        assert result.messages[1] == compressed_msgs[1]
+
+        # context_compacted event published
+        compacted_events = bus.replay("context_compacted")
+        assert len(compacted_events) == 1
+        assert compacted_events[0]["tokens_before"] == 100000
+        assert compacted_events[0]["tokens_after"] == 50000
+        assert compacted_events[0]["tokens_saved"] == 50000
+
+    @pytest.mark.asyncio
+    async def test_no_compression_below_threshold(self):
+        """TokenGuard returns 'ok' → compressor not called."""
+        bus = EventBus()
+        session = Session()
+        session.add_message("system", content="You are helpful.")
+        session.add_message("user", content="Hello")
+
+        client = MagicMock()
+        client.complete = AsyncMock(
+            return_value={"content": "Final answer", "tool_calls": []}
+        )
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        token_guard = MagicMock()
+        token_guard.check = MagicMock(return_value=("ok", 50000, 96000))
+
+        compressor = MagicMock()
+        compressor.check_and_compress = AsyncMock()
+
+        fsm = _make_fsm_with_context(
+            client, bus, budget_guard, loop_detector, message_validator,
+            token_guard=token_guard, compressor=compressor,
+        )[0]
+
+        result = await fsm.run(session)
+
+        compressor.check_and_compress.assert_not_called()
+        assert result.state == AgentState.FINISH
+
+    @pytest.mark.asyncio
+    async def test_summary_llm_call(self):
+        """Compression triggers summary LLM call via client.complete with no tools."""
+        bus = EventBus()
+        session = Session()
+        session.add_message("system", content="You are helpful.")
+        session.add_message("user", content="Run some commands")
+        # 3 rounds of tool calls so _find_round_cutoff returns non-zero
+        for i in range(3):
+            session.add_message("assistant", content=None, tool_calls=[
+                {"id": f"call_{i}", "function": {"name": "bash", "arguments": '{"cmd":"ls"}'}}
+            ])
+            session.add_message("tool", content=f"result{i}", tool_call_id=f"call_{i}")
+        session.add_message("assistant", content="Done.", tool_calls=[])
+
+        client = MagicMock()
+        client.complete = AsyncMock(side_effect=[
+            {"content": "We ran some commands and got results.", "tool_calls": []},
+            {"content": "All tasks completed.", "tool_calls": []},
+        ])
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        # Real compressor with mocked token counter to force compression path
+        mock_counter = MagicMock()
+        mock_counter.count_messages = MagicMock(return_value=100000)
+        real_compressor = ContextCompressor(mock_counter, window_size=128000)
+
+        token_guard = MagicMock()
+        token_guard.check = MagicMock(return_value=("compress", 100000, 96000))
+
+        fsm = _make_fsm_with_context(
+            client, bus, budget_guard, loop_detector, message_validator,
+            token_guard=token_guard, compressor=real_compressor,
+        )[0]
+
+        result = await fsm.run(session)
+
+        # client.complete called twice: summary (no tools) + actual (with tools)
+        assert client.complete.call_count == 2
+
+        # First call = summary, should have no tools
+        first_call = client.complete.call_args_list[0]
+        assert first_call.kwargs.get("tools") is None
+        first_call_msgs = first_call.args[0]
+        assert len(first_call_msgs) == 1
+        assert "summar" in first_call_msgs[0]["content"].lower()
+
+        assert result.state == AgentState.FINISH
+
+    @pytest.mark.asyncio
+    async def test_compressor_none_skips_compression(self):
+        """TokenGuard returns 'compress' but compressor is None → skip compression."""
+        bus = EventBus()
+        session = Session()
+        session.add_message("system", content="You are helpful.")
+        session.add_message("user", content="Hello")
+
+        client = MagicMock()
+        client.complete = AsyncMock(
+            return_value={"content": "Final answer", "tool_calls": []}
+        )
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        token_guard = MagicMock()
+        token_guard.check = MagicMock(return_value=("compress", 100000, 96000))
+
+        fsm = _make_fsm_with_context(
+            client, bus, budget_guard, loop_detector, message_validator,
+            token_guard=token_guard, compressor=None,
+        )[0]
+
+        result = await fsm.run(session)
+
+        # No context_compacted event should be published
+        compacted_events = bus.replay("context_compacted")
+        assert len(compacted_events) == 0
+
+        assert result.state == AgentState.FINISH
+
+    @pytest.mark.asyncio
+    async def test_overflow_file_reference_in_content(self):
+        """ToolResult with overflow_file → tool_content contains overflow reference."""
+        bus = EventBus()
+        session = Session()
+
+        client = MagicMock()
+        client.complete = AsyncMock(side_effect=[
+            make_response(
+                content=None,
+                tool_calls=[make_tool_call("bash", {"cmd": "big-job"}, "call_1")],
+            ),
+            make_response(content="Done"),
+        ])
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        fsm, _, executor, _ = _make_fsm_with_context(
+            client, bus, budget_guard, loop_detector, message_validator,
+        )
+
+        big_data = "x" * 90000
+        executor.execute = AsyncMock(
+            return_value=ToolResult.success(
+                data=big_data, duration_ms=10.0,
+                overflow_file=".sandbox/overflow/test.txt",
+            )
+        )
+
+        result = await fsm.run(session)
+
+        tool_msgs = [m for m in result.messages if m["role"] == "tool"]
+        assert len(tool_msgs) >= 1
+
+        tool_content = tool_msgs[0].get("content", "")
+        assert "[工具输出已保存至:" in tool_content
+        assert ".sandbox/overflow/test.txt" in tool_content
+        assert "预览" in tool_content
+        assert big_data[:500] in tool_content
+
+    @pytest.mark.asyncio
+    async def test_no_overflow_reference_normal_output(self):
+        """ToolResult without overflow_file → tool_content is direct data."""
+        bus = EventBus()
+        session = Session()
+
+        client = MagicMock()
+        client.complete = AsyncMock(side_effect=[
+            make_response(
+                content=None,
+                tool_calls=[make_tool_call("bash", {"cmd": "ls"}, "call_1")],
+            ),
+            make_response(content="Done"),
+        ])
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        fsm, _, executor, _ = _make_fsm_with_context(
+            client, bus, budget_guard, loop_detector, message_validator,
+        )
+
+        executor.execute = AsyncMock(
+            return_value=ToolResult.success(data="normal output", duration_ms=10.0)
+        )
+
+        result = await fsm.run(session)
+
+        tool_msgs = [m for m in result.messages if m["role"] == "tool"]
+        assert len(tool_msgs) >= 1
+        assert tool_msgs[0].get("content") == "normal output"
+
+    @pytest.mark.asyncio
+    async def test_append_only_after_compression(self):
+        """Compression preserves last N rounds of messages intact (append-only)."""
+        bus = EventBus()
+        session = Session()
+        session.add_message("system", content="You are helpful.")
+        session.add_message("user", content="Run commands")
+        # 3 rounds of tool calls
+        for i in range(3):
+            session.add_message("assistant", content=None, tool_calls=[
+                {"id": f"call_{i}", "function": {"name": "bash", "arguments": '{"cmd":"ls"}'}}
+            ])
+            session.add_message("tool", content=f"result{i}", tool_call_id=f"call_{i}")
+        session.add_message("assistant", content="Done.", tool_calls=[])
+
+        # Capture original messages for comparison
+        original_msgs = list(session.messages)
+        cutoff_idx = 2  # first 2 msgs (system + user) get summarized
+
+        client = MagicMock()
+        client.complete = AsyncMock(side_effect=[
+            {"content": "Summary of work", "tool_calls": []},
+            {"content": "All completed.", "tool_calls": []},
+        ])
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        # Real compressor with mocked token counter
+        mock_counter = MagicMock()
+        mock_counter.count_messages = MagicMock(return_value=100000)
+        real_compressor = ContextCompressor(
+            mock_counter, window_size=128000, preserve_rounds=3,
+        )
+
+        token_guard = MagicMock()
+        token_guard.check = MagicMock(return_value=("compress", 100000, 96000))
+
+        fsm = _make_fsm_with_context(
+            client, bus, budget_guard, loop_detector, message_validator,
+            token_guard=token_guard, compressor=real_compressor,
+        )[0]
+
+        result = await fsm.run(session)
+
+        # After compression: [summary, preserved..., assistant_response]
+        preserved_original = original_msgs[cutoff_idx:]
+        result_preserved = result.messages[1:-1]  # skip summary and final assistant
+
+        # Verify append-only: preserved rounds have same content
+        assert len(result_preserved) == len(preserved_original)
+        for orig, res in zip(preserved_original, result_preserved):
+            assert orig["role"] == res["role"]
+            assert orig.get("content") == res.get("content")
+
+    @pytest.mark.asyncio
+    async def test_overflow_written_event_published(self):
+        """ToolResult with overflow_file → overflow_written event published."""
+        bus = EventBus()
+        session = Session()
+
+        client = MagicMock()
+        client.complete = AsyncMock(side_effect=[
+            make_response(
+                content=None,
+                tool_calls=[make_tool_call("bash", {"cmd": "big-job"}, "call_1")],
+            ),
+            make_response(content="Done"),
+        ])
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        fsm, _, executor, _ = _make_fsm_with_context(
+            client, bus, budget_guard, loop_detector, message_validator,
+        )
+
+        executor.execute = AsyncMock(
+            return_value=ToolResult.success(
+                data="x" * 90000, duration_ms=10.0,
+                overflow_file=".sandbox/overflow/test.txt",
+            )
+        )
+
+        await fsm.run(session)
+
+        overflow_events = bus.replay("overflow_written")
+        assert len(overflow_events) == 1
+        assert overflow_events[0]["file_path"] == ".sandbox/overflow/test.txt"
+        assert overflow_events[0]["tool_name"] == "bash"
+        assert overflow_events[0]["size_kb"] > 0
