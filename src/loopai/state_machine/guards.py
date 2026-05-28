@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from loopai.context.token_counter import TokenCounter
     from loopai.events.bus import EventBus
     from loopai.tools.types import PermissionLevel as PermissionLevelType
 
@@ -434,3 +435,63 @@ class PermissionGuard:
         self._results[confirmation_id] = approved
         if confirmation_id in self._pending:
             self._pending[confirmation_id].set()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TokenGuard — token-budget guard (D-01, D-03)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TokenGuard:
+    """Token budget guard — detects when context usage reaches threshold.
+
+    Checks the current message list against a configurable context-window
+    threshold.  Returns a signal that the caller (typically the FSM) can
+    use to decide whether to trigger :class:`ContextCompressor`.
+
+    This guard follows the same pattern as :class:`BudgetGuard`:
+    ``check()`` returns a status signal without directly modifying the
+    message list.
+
+    Decision references:
+        D-01: Sliding-window + summary compression at 75 % threshold.
+        D-03: tiktoken cl100k_base for approximate counting.
+
+    Args:
+        token_counter: A :class:`~loopai.context.token_counter.TokenCounter`
+            instance.
+        window_size: Token budget for the context window (default 128000).
+        threshold: Fraction of *window_size* that triggers a ``"compress"``
+            signal (default 0.75).
+    """
+
+    def __init__(
+        self,
+        token_counter: TokenCounter,
+        window_size: int = 128000,
+        threshold: float = 0.75,
+    ) -> None:
+        self._counter = token_counter
+        self._window_size = window_size
+        self._threshold = threshold
+
+    def check(self, messages: list[dict]) -> tuple[str, int, int]:
+        """Check whether the message list exceeds the token threshold.
+
+        Args:
+            messages: The current message list.
+
+        Returns:
+            ``(action, token_count, threshold_tokens)``.
+            - ``action``: ``"ok"`` if the token count is below the threshold,
+              ``"compress"`` if it meets or exceeds the threshold.
+            - ``token_count``: Current token count of the messages.
+            - ``threshold_tokens``: The threshold value
+              (``window_size * threshold``, rounded).
+        """
+        token_count = self._counter.count_messages(messages)
+        threshold_tokens = int(self._window_size * self._threshold)
+
+        if token_count >= threshold_tokens:
+            return ("compress", token_count, threshold_tokens)
+        return ("ok", token_count, threshold_tokens)

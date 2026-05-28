@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from loopai.state_machine.guards import (
     BudgetGuard,
     LoopDetector,
     MessageValidator,
+    TokenGuard,
     ValidationError,
 )
 
@@ -440,3 +443,73 @@ class TestBudgetGuardUnreachable:
         assert guard.check_unreachable(False) is None
         # 重新计数
         assert guard.check_unreachable(True) is None
+
+
+# =============================================================================
+# TokenGuard 测试
+# =============================================================================
+
+
+class TestTokenGuard:
+    """TokenGuard Token 预算守卫测试 —— 3 个用例。"""
+
+    def test_ok_below_threshold(self) -> None:
+        """未达 75% 阈值时返回 ("ok", token_count, threshold_tokens)。"""
+        counter = MagicMock()
+        counter.count_messages.return_value = 50000
+        guard = TokenGuard(counter, window_size=128000, threshold=0.75)
+
+        action, token_count, threshold_tokens = guard.check([])
+
+        assert action == "ok"
+        assert token_count == 50000
+        assert threshold_tokens == 96000
+
+    def test_compress_at_threshold(self) -> None:
+        """达到 75% 阈值时返回 ("compress", token_count, threshold_tokens)。"""
+        counter = MagicMock()
+        counter.count_messages.return_value = 96000  # 128000 * 0.75
+        guard = TokenGuard(counter, window_size=128000, threshold=0.75)
+
+        action, token_count, threshold_tokens = guard.check([])
+
+        assert action == "compress"
+        assert token_count == 96000
+        assert threshold_tokens == 96000
+
+    def test_compress_above_threshold(self) -> None:
+        """超过 75% 阈值时返回 ("compress", token_count, threshold_tokens)。"""
+        counter = MagicMock()
+        counter.count_messages.return_value = 100000
+        guard = TokenGuard(counter, window_size=128000, threshold=0.75)
+
+        action, token_count, threshold_tokens = guard.check([])
+
+        assert action == "compress"
+        assert token_count == 100000
+        assert threshold_tokens == 96000
+
+    def test_different_window_size(self) -> None:
+        """自定义 window_size 正常生效。"""
+        counter = MagicMock()
+        counter.count_messages.return_value = 40000
+        guard = TokenGuard(counter, window_size=64000, threshold=0.50)
+
+        action, token_count, threshold_tokens = guard.check([])
+
+        assert action == "compress"  # 40000 >= 64000*0.5=32000
+        assert token_count == 40000
+        assert threshold_tokens == 32000
+
+    def test_input_not_mutated(self) -> None:
+        """check() 不修改原始消息列表。"""
+        counter = MagicMock()
+        counter.count_messages.return_value = 50000
+        guard = TokenGuard(counter)
+
+        messages = [{"role": "user", "content": "Hello"}]
+        original_len = len(messages)
+
+        guard.check(messages)
+
+        assert len(messages) == original_len
