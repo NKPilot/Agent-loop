@@ -243,11 +243,12 @@ class ReActFSM:
         any_blocked = False
 
         for tc in tool_calls_data:
-            tool_name = tc.get("name", "unknown")
+            func = tc.get("function", {})
+            tool_name = func.get("name", tc.get("name", "unknown"))
             tool_call_id = tc.get("id", "") or tc.get("tool_call_id", "")
 
-            # Resolve arguments: may be a dict or a JSON string
-            raw_args = tc.get("arguments", {})
+            # Resolve arguments: function.arguments is a JSON string per OpenAI spec
+            raw_args = func.get("arguments", tc.get("arguments", {}))
             if isinstance(raw_args, str):
                 try:
                     raw_args = _json.loads(raw_args)

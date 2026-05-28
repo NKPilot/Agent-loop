@@ -146,18 +146,23 @@ class LLMClient:
                     },
                 )
 
-            # Build final tool_calls list
+            # Build final tool_calls list in OpenAI-compatible format
             tool_calls: list[dict[str, Any]] = []
             for idx in sorted(tool_calls_acc.keys()):
                 acc = tool_calls_acc[idx]
+                args_str = acc["args_str"]
+                # Ensure arguments is valid JSON, default to "{}"
                 try:
-                    args = json.loads(acc["args_str"])
+                    json.loads(args_str)
                 except (json.JSONDecodeError, TypeError):
-                    args = {}
+                    args_str = "{}"
                 tool_calls.append({
-                    "name": acc["name"],
-                    "arguments": args,
-                    "tool_call_id": acc["id"] or f"call_{session_id}_{idx}",
+                    "id": acc["id"] or f"call_{session_id}_{idx}",
+                    "type": "function",
+                    "function": {
+                        "name": acc["name"],
+                        "arguments": args_str,
+                    },
                 })
 
             return {

@@ -240,9 +240,9 @@ class TestLLMClient:
         assert starts[0]["tool_call_id"] == "call_test123"
         assert starts[0]["step_num"] == 2
 
-        # Return value
+        # Return value — standard OpenAI format
         assert len(result["tool_calls"]) == 1
-        assert result["tool_calls"][0]["name"] == "get_weather"
+        assert result["tool_calls"][0]["function"]["name"] == "get_weather"
 
     @pytest.mark.asyncio
     async def test_stream_completion_returns_message(self, config, bus):
