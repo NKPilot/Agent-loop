@@ -117,7 +117,7 @@ async def run_session(
         # 2. Wait for consumers to drain (with timeout)
         await asyncio.wait_for(
             asyncio.gather(logger_task, renderer_task, return_exceptions=True),
-            timeout=5.0,
+            timeout=10.0,
         )
 
         # 3. Flush and close the logger
