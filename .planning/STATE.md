@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-05-28T06:23:00.000Z"
+last_updated: "2026-05-28T06:38:00.000Z"
 progress:
   total_phases: 3
-  completed_phases: 2
-  total_plans: 12
-  completed_plans: 12
+  completed_phases: 3
+  total_plans: 13
+  completed_plans: 13
   percent: 100
 ---
 
@@ -24,9 +24,9 @@ progress:
 ## 当前位置
 
 阶段: 3 / 5 (上下文管理)
-计划: 2 / 3 (完成)
-状态: 执行中
-最近活动: 2026-05-28 — 03-02 上下文压缩器 + Token 预算守卫 完成
+计划: 3 / 3 (完成)
+状态: 完成
+最近活动: 2026-05-28 — 03-03 FSM 集成 + 追加式固化 完成
 
 进度: [██████████] 100%
 
@@ -44,12 +44,12 @@ progress:
 |------|--------|--------|-----------|
 | 1. Agent 核心循环 | 5 | — | — |
 | 2. 工具系统 | 4 | — | — |
-| 3. 上下文管理 | 2 (已完成) | 22min | 11min |
+| 3. 上下文管理 | 3 (已完成) | 37min | 12min |
 
 **近期趋势:**
 
-- 最近执行: 03-02-上下文压缩器 + Token 预算守卫 (8min)
-- 趋势: Phase 3 推进中，03-03 FSM 集成为下一计划
+- 最近执行: 03-03-FSM 集成 + 追加式固化 (15min)
+- 趋势: Phase 3 全部完成，Phase 4 韧性与恢复为下一阶段
 
 *每次计划完成后更新*
 
@@ -69,6 +69,9 @@ progress:
 - [03-02]: 保留最近 3 轮完整对话（Claude's Discretion），不足 3 轮时不压缩
 - [03-02]: 摘要消息使用 role=system + [Compressed Summary] 前缀标记（T-03-02-01/02）
 - [03-02]: _find_round_cutoff 从末端反向遍历：只计数 assistant 消息 + tool_calls 为对话轮
+- [03-03]: TokenGuard 检查插入在 _handle_reason 的消息验证后、预算检查前，触发压缩时调用 ContextCompressor 并发布 context_compacted 事件
+- [03-03]: _handle_act 工具结果有 overflow_file 时使用引用格式替换上下文内容：[工具输出已保存至: {path} ({size}KB)] + 前 500 字符预览
+- [03-03]: session.messages 通过 clear()+extend() 原地替换，追加式存储原则（不修改已有消息）
 
 ### 待办事项
 
@@ -87,5 +90,5 @@ progress:
 ## 会话连续性
 
 上次会话: 2026-05-28
-停止于: 03-02 上下文压缩器 + Token 预算守卫 完成
-恢复文件: .planning/phases/03-context-management/03-02-SUMMARY.md
+停止于: 03-03 FSM 集成 + 追加式固化 完成
+恢复文件: .planning/phases/03-context-management/03-03-SUMMARY.md
