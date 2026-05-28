@@ -109,16 +109,21 @@ async def run_session(
     # ── Execute agent loop ──────────────────────────────────────────
     try:
         session = await fsm.run(session)
+    except Exception as exc:
+        print(f"\n[ERROR] Agent 执行失败: {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise
     finally:
         # Graceful shutdown sequence:
         # 1. Send None sentinels to all subscriber queues
         await bus.shutdown()
 
         # 2. Wait for consumers to drain (with timeout)
-        await asyncio.wait_for(
-            asyncio.gather(logger_task, renderer_task, return_exceptions=True),
-            timeout=10.0,
+        done, pending = await asyncio.wait(
+            [logger_task, renderer_task], timeout=10.0
         )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
         # 3. Flush and close the logger
         await logger.stop()
