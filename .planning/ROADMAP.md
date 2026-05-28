@@ -47,7 +47,7 @@
 - [x] 02-01-PLAN.md — 工具系统基础：类型定义、@tool 装饰器（自动 Schema 生成）、ToolRegistry、执行管线（含错误分类+重试）
 - [x] 02-02-PLAN.md — Bash 工具与权限系统：命令分类器（白名单/黑名单+路径感知）、BashTool（安全 subprocess）、PermissionGuard
 - [x] 02-03-PLAN.md — FSM 集成与 CLI 确认：事件 Schema 扩展、ReActFSM 重构（真实工具管线）、CLI 确认交互
-- [ ] 02-04-PLAN.md — 磁盘清理业务验证：4 磁盘工具注册、预设沙箱场景、端到端流程测试
+- [x] 02-04-PLAN.md — 磁盘清理业务验证：4 磁盘工具注册、预设沙箱场景、端到端流程测试
 
 ### 阶段 3: 上下文管理
 **目标**: Token 计数、上下文压缩、追加式存储、溢出文件处理，确保上下文窗口不会无限制膨胀
@@ -58,13 +58,11 @@
   2. 上下文压缩后，旧消息被摘要替代、工具输出被截断、过期历史被移除，LLM 仍能正常运行
   3. 超长工具输出（>80K 字符）自动写入溢出文件而非截断到上下文中，agent 仍可引用
   4. 所有消息操作（包括压缩）均为追加式，不做原地修改，审计轨迹完整可追溯
-**计划**: 5 plans
+**计划**: 3 plans
 **Plans:**
-- [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
-- [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
-- [x] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
-- [x] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
-- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
+- [ ] 03-01-PLAN.md — Token 计数 + 溢出文件 + 事件 Schema：TokenCounter（tiktoken）、ToolExecutor 溢出文件写入、ContextCompacted/TokenWarning 事件类型
+- [ ] 03-02-PLAN.md — 上下文压缩 + Token 守卫：ContextCompressor 滑动窗口摘要、TokenGuard 阈值检测
+- [ ] 03-03-PLAN.md — FSM 集成 + 追加式固化：TokenGuard/Compressor/溢出文件集成到 ReActFSM 的 _handle_reason 和 _handle_act
 
 ### 阶段 4: 韧性与恢复
 **目标**: 检查点、循环检测升级、失败注册表、守卫管道、分层恢复、熔断器，确保 agent 运行的可靠性
@@ -76,13 +74,9 @@
   3. 曾经失败的操作被注册到"不再重复"列表，同一会话中 agent 不会再次尝试该操作
   4. Token 预算、成本、速率限制守卫有效拦截越界操作，agent 收到明确守卫违规反馈
   5. 某工具连续失败达到阈值后，熔断器自动暂停该工具；暂停期间 agent 不会收到该工具的调用选项
-**计划**: 5 plans
+**计划**: 待规划
 **Plans:**
-- [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
-- [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
-- [x] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
-- [x] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
-- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
+- [ ] 待规划
 
 ### 阶段 5: 可观测性与 Web 前端
 **目标**: 事件总线、SSE 实时推流、React Web 前端展示、Token/成本追踪、会话历史浏览，以及完整的交互式演示
@@ -93,21 +87,16 @@
   2. 每次 LLM 调用的 token 消耗和预估成本在前端面板实时展示
   3. 用户可以浏览历史 agent 会话记录，查看过去任意会话的完整步骤
   4. 磁盘清理演示全流程可通过网页交互完成，包括危险操作的确认弹窗和实时状态反馈
-**计划**: 5 plans
+**计划**: 待规划
 **Plans:**
-- [x] 01-01-PLAN.md — EventBus 基础设施：项目脚手架、事件 Schema、asyncio.Queue 发布订阅
-- [x] 01-02-PLAN.md — 守卫与配置：BudgetGuard、LoopDetector、MessageValidator、AgentConfig
-- [ ] 01-03-PLAN.md — LLM 集成：LLMClient（OpenAI beta streaming）、Session 状态容器
-- [ ] 01-04-PLAN.md — 事件消费者：JSONL 日志记录器、Rich CLI 实时渲染器
-- [ ] 01-05-PLAN.md — 状态机与会话编排：ReActFSM、CLI 入口点、优雅关闭
-**UI 阶段**: 是
+- [ ] 待规划
 
 ## 进度
 
 | 阶段 | 计划完成 | 状态 | 完成日期 |
 |------|----------|------|----------|
-| 1. Agent 核心循环 | 0/0 | 未开始 | - |
-| 2. 工具系统与业务验证 | 0/0 | 未开始 | - |
-| 3. 上下文管理 | 0/0 | 未开始 | - |
+| 1. Agent 核心循环 | 5/5 | 完成 | - |
+| 2. 工具系统与业务验证 | 4/4 | 完成 | - |
+| 3. 上下文管理 | 0/3 | 待规划 | - |
 | 4. 韧性与恢复 | 0/0 | 未开始 | - |
 | 5. 可观测性与 Web 前端 | 0/0 | 未开始 | - |
