@@ -19,7 +19,7 @@ Decision references:
 from __future__ import annotations
 
 import random
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -55,6 +55,36 @@ class PermissionLevel(StrEnum):
     SAFE = "safe"
     MODERATE = "moderate"
     DANGEROUS = "dangerous"
+
+
+class RecoveryLayer(IntEnum):
+    """Recovery escalation layers (D-03, D-04).
+
+    Each layer has independent entry conditions.
+    """
+
+    COSMETIC = 1       # Fix argument formatting, retry
+    IN_CONTEXT = 2     # LLM sees structured error, self-corrects (FSM level)
+    BACKOFF = 3        # Exponential backoff retry (existing)
+    ESCALATE = 4       # Pause, escalate to human
+
+
+class RecoveryConfig(BaseModel):
+    """Per-layer thresholds for the 4-layer recovery (D-04).
+
+    Each layer has its own max_attempts counter, independent escalation.
+
+    Attributes:
+        cosmetic_max_attempts: Max attempts for Layer 1 (cosmetic JSON repair).
+        in_context_max_attempts: Max LLM re-call attempts for Layer 2 (FSM level).
+        backoff_max_attempts: Max retry attempts for Layer 3 (backoff + jitter).
+        escalate_timeout: Seconds to wait for human input on Layer 4.
+    """
+
+    cosmetic_max_attempts: int = 1
+    in_context_max_attempts: int = 2
+    backoff_max_attempts: int = 3
+    escalate_timeout: float = 120.0
 
 
 # ── Configuration models ──────────────────────────────────────────────
