@@ -1,7 +1,9 @@
 """Shared pytest fixtures for API integration tests."""
 
 import pytest
+from fastapi.testclient import TestClient
 
+from loopai.api.app import create_app
 from loopai.events.bus import EventBus
 
 
@@ -9,6 +11,13 @@ from loopai.events.bus import EventBus
 def event_bus():
     """Return a fresh EventBus instance for each API test."""
     return EventBus()
+
+
+@pytest.fixture
+def test_client():
+    """Return a FastAPI TestClient for API endpoint testing."""
+    app = create_app()
+    return TestClient(app)
 
 
 @pytest.fixture
