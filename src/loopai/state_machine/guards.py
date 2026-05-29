@@ -11,8 +11,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import time as _time
+import math
+import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -35,7 +37,12 @@ class ValidationError(ValueError):
 
 
 class LoopClassification(StrEnum):
-    """Loop classification types for the enhanced loop detector (Phase 4)."""
+    """Classification of detected loop patterns for metacognitive prompting (RES-02).
+
+    LOOP_EXACT_SAME: Same tool called with the same arguments repeatedly.
+    LOOP_SAME_TOOL: Same tool called repeatedly but with different arguments.
+    LOOP_STUCK: Different tools called but no meaningful progress (heuristic).
+    """
 
     LOOP_EXACT_SAME = "exact_same"
     LOOP_SAME_TOOL = "same_tool"
@@ -51,8 +58,6 @@ class LoopDetector:
     - 警告 (warn): 连续 3 次相同调用时注入系统警告
     - 阻止 (block): 连续 5 次相同调用时拒绝执行
     - 强制退出 (force_exit): 阻止后模式仍然持续
-
-    Phase 4: check() returns a triple (should_proceed, action, classification).
 
     Attributes:
         window_size: 滑动窗口大小，默认 20。
@@ -90,7 +95,9 @@ class LoopDetector:
         raw = f"{tool_name}:{args_json}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
-    def check(self, tool_name: str, arguments: dict) -> tuple[bool, str, LoopClassification | None]:
+    def check(
+        self, tool_name: str, arguments: dict
+    ) -> tuple[bool, str, LoopClassification | None]:
         """检查此工具调用是否构成循环。
 
         Args:
@@ -99,9 +106,7 @@ class LoopDetector:
 
         Returns:
             (should_proceed, action, classification) 三元组。
-            should_proceed 为 True 时允许调用继续，False 时拒绝。
-            action 为 "allow"、"warn"、"block" 或 "force_exit" 之一。
-            classification 为 LoopClassification 枚举值或 None。
+            classification 为 None 表示无循环，否则为循环分类类型。
         """
         sig = self._signature(tool_name, arguments)
 
@@ -113,7 +118,28 @@ class LoopDetector:
 
         self._window.append((tool_name, sig))
 
-        classification = LoopClassification.LOOP_EXACT_SAME if sig == self._last_signature else None
+        # Determine classification based on window analysis (always run)
+        classification: LoopClassification | None = None
+        recent = list(self._window)[-min(5, len(self._window)):]
+
+        if recent and self._consecutive_count >= self._warn_threshold:
+            # Primary path: consecutive same-signature calls trigger classification
+            if all(t == tool_name and s == sig for t, s in recent):
+                classification = LoopClassification.LOOP_EXACT_SAME
+            elif all(t == tool_name for t, _ in recent):
+                classification = LoopClassification.LOOP_SAME_TOOL
+            else:
+                classification = LoopClassification.LOOP_STUCK
+        elif recent and len(recent) >= self._warn_threshold:
+            # Secondary path: window has enough entries but different signatures
+            # Analyze pattern without consecutive same-signature requirement
+            tools = {t for t, _ in recent}
+            if len(tools) == 1:
+                # All entries are the same tool (but different args)
+                classification = LoopClassification.LOOP_SAME_TOOL
+            elif len(tools) >= self._warn_threshold:
+                # All different tools — stuck pattern
+                classification = LoopClassification.LOOP_STUCK
 
         if self._consecutive_count > self._block_threshold:
             return (False, "force_exit", classification)
@@ -121,7 +147,54 @@ class LoopDetector:
             return (False, "block", classification)
         elif self._consecutive_count >= self._warn_threshold:
             return (True, "warn", classification)
-        return (True, "allow", None)
+        return (True, "allow", classification)
+
+    @staticmethod
+    def get_meta_prompt(
+        tool_name: str,
+        classification: LoopClassification | None,
+        consecutive_count: int,
+    ) -> str:
+        """Generate a metacognitive prompt explaining why the loop was detected.
+
+        Args:
+            tool_name: The tool being called.
+            classification: The loop classification type.
+            consecutive_count: Number of consecutive identical calls.
+
+        Returns:
+            A Chinese metacognitive prompt string to inject as system message.
+        """
+        if classification == LoopClassification.LOOP_EXACT_SAME:
+            return (
+                f"[元认知提示] 你已经连续 {consecutive_count} 次使用完全相同参数调用 "
+                f"'{tool_name}'，每次都得到相同结果。继续重复不会改变结果。"
+                f"请尝试以下策略之一：\n"
+                f"1. 换个思路，使用不同的工具或参数\n"
+                f"2. 检查已有信息是否能直接回答问题\n"
+                f"3. 如果无法完成，直接告知用户并解释原因"
+            )
+        elif classification == LoopClassification.LOOP_SAME_TOOL:
+            return (
+                f"[元认知提示] 你反复使用 '{tool_name}' 工具（{consecutive_count} 次），"
+                f"虽然参数不同但未取得实质进展。请考虑：\n"
+                f"1. 是否需要换一个工具？\n"
+                f"2. 已有信息是否足够回答用户？\n"
+                f"3. 尝试不同的方法解决问题"
+            )
+        elif classification == LoopClassification.LOOP_STUCK:
+            return (
+                f"[元认知提示] 检测到你可能在执行中卡住了 — "
+                f"最近 {consecutive_count} 步你尝试了不同的工具但没有取得进展。"
+                f"请暂停并重新评估：\n"
+                f"1. 当前目标是什么？\n"
+                f"2. 哪些操作真正有助于达成目标？\n"
+                f"3. 是否需要向用户请求更多信息？"
+            )
+        return (
+            f"[元认知提示] 检测到重复调用模式（{consecutive_count} 次）。"
+            f"请尝试不同的方法或直接给出你的结论。"
+        )
 
     def reset(self) -> None:
         """重置检测器状态。
@@ -513,185 +586,226 @@ class TokenGuard:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Phase 4: GuardPipeline + CostGuard + RateLimitGuard (RES-04)
+# GuardResult — 守卫管道结果数据类
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+@dataclass
 class GuardResult:
-    """Standardized result from a guard check.
+    """Result of a guard check in the pipeline.
 
     Attributes:
-        action: The guard's recommendation ("ok", "compress", "blocked", "warn").
-        guard_name: The name of the guard (e.g. "TokenGuard", "CostGuard").
-        detail: Human-readable detail about the guard decision.
+        action: "ok" (all clear), "compress" (compression needed from TokenGuard),
+                "blocked" (guard violation), "warn" (approaching limit).
+        guard_name: Name of the guard class that produced this result.
+        detail: Human-readable detail message for the blocking guard.
     """
 
-    def __init__(self, action: str = "ok", guard_name: str | None = None,
-                 detail: str | None = None) -> None:
-        self.action = action
-        self.guard_name = guard_name
-        self.detail = detail
+    action: str
+    guard_name: str | None = None
+    detail: str | None = None
 
 
-class GuardPipeline:
-    """Sequential guard execution pipeline (RES-04).
-
-    Executes each registered guard's ``check()`` method in order.
-    The first guard that returns a non-ok action stops the pipeline.
-
-    The pipeline is configured with message-level guards (TokenGuard,
-    CostGuard). Tool-level guards (RateLimitGuard) are wired separately
-    by the FSM in ``_handle_act``.
-
-    Args:
-        guards: Ordered list of guard instances, each with a ``check()`` method.
-    """
-
-    def __init__(self, guards: list) -> None:
-        self._guards = guards
-
-    def check(self, messages: list[dict]) -> GuardResult:
-        """Run each guard's check in sequence.
-
-        Args:
-            messages: The current message list to pass to each guard.
-
-        Returns:
-            A GuardResult from the first guard that triggers a non-ok action,
-            or a default "ok" result if all guards pass.
-        """
-        for guard in self._guards:
-            result = guard.check(messages)
-            # Each guard may return GuardResult or a tuple; normalize.
-            if isinstance(result, GuardResult):
-                if result.action != "ok":
-                    return result
-            elif isinstance(result, tuple):
-                # TokenGuard returns (action, token_count, threshold)
-                action = result[0]
-                if action != "ok":
-                    return GuardResult(
-                        action=action,
-                        guard_name=type(guard).__name__,
-                        detail=f"{type(guard).__name__} returned action={action}",
-                    )
-            else:
-                if result and getattr(result, "action", "ok") != "ok":
-                    return GuardResult(
-                        action=getattr(result, "action", "blocked"),
-                        guard_name=type(guard).__name__,
-                    )
-        return GuardResult(action="ok")
+# ═══════════════════════════════════════════════════════════════════════════
+# CostGuard — 成本估算守卫
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 class CostGuard:
-    """Cost-based guard — estimates LLM call cost and blocks if too expensive.
+    """Cost estimation guard — estimates LLM call cost from token count.
 
-    Estimates token usage from message content length and model pricing.
-    Blocks calls that exceed ``max_cost_per_call``.
+    Uses a hardcoded model pricing table. Returns a signal when estimated
+    cost exceeds the per-call budget.
 
-    Args:
-        max_cost_per_call: Maximum cost allowed per LLM call in USD.
-        price_per_1k_tokens: Approximate cost per 1000 tokens for the model.
+    Attributes:
+        model_cost_per_1k: Dict mapping model prefix to (input_cost_per_1k, output_cost_per_1k).
+        max_cost_per_call: Maximum allowed cost per LLM call in USD (default 0.05).
     """
 
-    def __init__(self, max_cost_per_call: float = 0.05,
-                 price_per_1k_tokens: float = 0.01) -> None:
+    _DEFAULT_PRICING: dict[str, tuple[float, float]] = {
+        "gpt-4o": (0.0025, 0.01),
+        "gpt-4o-mini": (0.00015, 0.0006),
+        "gpt-4": (0.03, 0.06),
+        "gpt-4-turbo": (0.01, 0.03),
+        "gpt-3.5-turbo": (0.0005, 0.0015),
+    }
+
+    def __init__(
+        self,
+        max_cost_per_call: float = 0.05,
+        pricing: dict[str, tuple[float, float]] | None = None,
+    ) -> None:
         self.max_cost_per_call = max_cost_per_call
-        self.price_per_1k_tokens = price_per_1k_tokens
+        self._pricing = pricing or dict(self._DEFAULT_PRICING)
+
+    def estimate_cost(self, token_count: int, model_name: str = "gpt-4o") -> float:
+        """Estimate cost for a single LLM call.
+
+        Uses model prefix matching (e.g., "gpt-4o-2024-08-06" matches "gpt-4o").
+        If model not found in pricing table, uses gpt-4o pricing as fallback.
+
+        Returns estimated cost in USD (rounded to 6 decimal places).
+        """
+        input_cost, output_cost = self._get_rates(model_name)
+        # Conservative estimate: assume output is ~30% of total tokens
+        input_tokens = int(token_count * 0.7)
+        output_tokens = token_count - input_tokens
+        cost = (input_tokens / 1000) * input_cost + (output_tokens / 1000) * output_cost
+        return round(cost, 6)
+
+    def _get_rates(self, model_name: str) -> tuple[float, float]:
+        """Look up pricing rates for a model name with prefix matching."""
+        for prefix, rates in self._pricing.items():
+            if model_name.startswith(prefix):
+                return rates
+        return self._pricing.get("gpt-4o", (0.0025, 0.01))
 
     def check(self, messages: list[dict], token_count: int | None = None,
               model_name: str = "gpt-4o") -> GuardResult:
-        """Estimate cost and check against max_cost_per_call.
+        """Check if estimated cost is within budget.
 
         Args:
-            messages: The message list (used for token estimation if
-                      token_count is not provided).
-            token_count: Explicit token count, or None to estimate from messages.
-            model_name: Model name (for logging only).
+            messages: Message list (used if token_count not provided — unused in this version).
+            token_count: Pre-computed token count. If None, uses len(messages) * 500 as rough estimate.
+            model_name: Model name for pricing lookup.
 
         Returns:
-            GuardResult with action="blocked" if cost exceeds threshold,
-            or action="ok" if within budget.
+            GuardResult with action="ok" if cost within budget, or "blocked" if over budget.
         """
         if token_count is None:
-            # Rough estimate: ~4 chars/token for English text
-            total_chars = sum(
-                len(str(m.get("content", ""))) for m in messages
-            )
-            token_count = max(1, total_chars // 4)
+            token_count = max(len(messages) * 500, 1000)  # Rough estimate fallback
 
-        estimated_cost = (token_count / 1000.0) * self.price_per_1k_tokens
-
-        if estimated_cost > self.max_cost_per_call:
+        cost = self.estimate_cost(token_count, model_name)
+        if cost > self.max_cost_per_call:
             return GuardResult(
                 action="blocked",
                 guard_name="CostGuard",
                 detail=(
-                    f"Estimated call cost ${estimated_cost:.4f} exceeds "
-                    f"limit ${self.max_cost_per_call:.2f}"
+                    f"Estimated cost ${cost:.6f} exceeds limit "
+                    f"${self.max_cost_per_call:.4f}"
                 ),
             )
-        return GuardResult(action="ok")
+        return GuardResult(action="ok", guard_name="CostGuard")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RateLimitGuard — 工具调用频率限制
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 class RateLimitGuard:
-    """Rate-limit guard — enforces max calls per time window.
+    """Rate limit guard — limits tool call frequency within a time window.
 
-    Prevents the agent from making too many tool calls in a short period.
-    Used in ``_handle_act`` to record each tool call and can be checked
-    before execution.
+    Uses a sliding time window (not sliding count) per tool.
+    Tracks call timestamps and blocks if calls exceed the limit within the window.
 
-    Args:
-        max_calls: Maximum number of calls allowed in the window.
-        window_seconds: The sliding window duration in seconds.
+    Attributes:
+        max_calls: Maximum allowed calls within the time window (default 10).
+        window_seconds: Time window in seconds (default 60.0).
     """
 
     def __init__(self, max_calls: int = 10, window_seconds: float = 60.0) -> None:
-        self._max_calls = max_calls
-        self._window_seconds = window_seconds
-        self._call_times: dict[str, list[float]] = {}
+        self.max_calls = max_calls
+        self.window_seconds = window_seconds
+        self._call_times: dict[str, list[float]] = {}  # tool_name -> [timestamps]
 
     def check(self, tool_name: str) -> GuardResult:
-        """Check if the rate limit has been exceeded for this tool.
+        """Check if tool has exceeded its rate limit.
 
         Args:
-            tool_name: The tool being called (currently all tools share one
-                       rate limit bucket).
+            tool_name: The tool to check rate limit for.
 
         Returns:
-            GuardResult with action="blocked" if rate limited, or "ok".
+            GuardResult with action="ok" if within limit, "blocked" if exceeded.
         """
-        now = _time.monotonic()
-        key = tool_name if tool_name else "__global__"
+        now = time.monotonic()
+        timestamps = self._call_times.get(tool_name, [])
 
-        if key not in self._call_times:
-            self._call_times[key] = []
+        # Prune timestamps outside the window
+        cutoff = now - self.window_seconds
+        active = [t for t in timestamps if t >= cutoff]
+        self._call_times[tool_name] = active
 
-        # Prune old entries outside the window
-        cutoff = now - self._window_seconds
-        self._call_times[key] = [
-            t for t in self._call_times[key] if t > cutoff
-        ]
-
-        if len(self._call_times[key]) >= self._max_calls:
+        if len(active) >= self.max_calls:
+            oldest = active[0] if active else now
+            retry_after = round(self.window_seconds - (now - oldest), 1)
             return GuardResult(
                 action="blocked",
                 guard_name="RateLimitGuard",
                 detail=(
-                    f"Rate limit exceeded: {len(self._call_times[key])} calls "
-                    f"in {self._window_seconds}s (max {self._max_calls})"
+                    f"Tool '{tool_name}' rate limit exceeded: "
+                    f"{len(active)} calls in {self.window_seconds}s window. "
+                    f"Retry after {retry_after}s."
                 ),
             )
-        return GuardResult(action="ok")
+        return GuardResult(action="ok", guard_name="RateLimitGuard")
 
     def record_call(self, tool_name: str) -> None:
-        """Record a tool call in the rate limit window.
+        """Record a tool call for rate limiting.
+
+        Must be called after the tool executes to update the rate counter.
+        """
+        if tool_name not in self._call_times:
+            self._call_times[tool_name] = []
+        self._call_times[tool_name].append(time.monotonic())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GuardPipeline — 顺序守卫管道，短路由机制
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class GuardPipeline:
+    """Sequential guard pipeline with short-circuit on first non-ok result.
+
+    Runs each guard's check() in order. If any guard returns action != "ok",
+    the pipeline short-circuits and returns that guard's result immediately.
+
+    Guards are injected as callables. The pipeline normalizes different
+    return types: GuardResult objects (CostGuard, RateLimitGuard) and
+    tuples (TokenGuard returning (action, count, threshold)).
+    """
+
+    def __init__(self, guards: list[Any]) -> None:
+        self._guards = guards
+
+    def check(self, messages: list[dict]) -> GuardResult:
+        """Run each guard sequentially. Short-circuit on first non-ok result.
 
         Args:
-            tool_name: The tool that was called.
+            messages: The current message list (passed to each guard).
+
+        Returns:
+            GuardResult from the first blocking guard, or GuardResult(action="ok")
+            if all guards pass.
         """
-        key = tool_name if tool_name else "__global__"
-        if key not in self._call_times:
-            self._call_times[key] = []
-        self._call_times[key].append(_time.monotonic())
+        for guard in self._guards:
+            raw = guard.check(messages)
+
+            # Normalize: handle both GuardResult objects and tuple returns
+            if isinstance(raw, GuardResult):
+                result = raw
+            elif isinstance(raw, tuple):
+                action = raw[0]
+                name = guard.__class__.__name__
+                if action == "ok":
+                    result = GuardResult(action="ok", guard_name=name)
+                elif action == "compress":
+                    result = GuardResult(
+                        action="compress",
+                        guard_name=name,
+                        detail=f"Token count {raw[1]} >= threshold {raw[2]}",
+                    )
+                else:
+                    result = GuardResult(
+                        action="blocked",
+                        guard_name=name,
+                        detail=f"Guard returned action={action}",
+                    )
+            else:
+                result = GuardResult(action="ok", guard_name=guard.__class__.__name__)
+
+            if result.action != "ok":
+                return result
+
+        return GuardResult(action="ok")
