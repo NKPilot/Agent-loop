@@ -74,9 +74,11 @@
   3. 曾经失败的操作被注册到"不再重复"列表，同一会话中 agent 不会再次尝试该操作
   4. Token 预算、成本、速率限制守卫有效拦截越界操作，agent 收到明确守卫违规反馈
   5. 某工具连续失败达到阈值后，熔断器自动暂停该工具；暂停期间 agent 不会收到该工具的调用选项
-**计划**: 待规划
+**计划**: 3 plans
 **Plans:**
-- [ ] 待规划
+- [ ] 04-01-PLAN.md — 韧性子系统基础：事件 Schema + CheckpointManager + FailureRegistry + CircuitBreaker
+- [ ] 04-02-PLAN.md — 守卫管道（GuardPipeline + CostGuard + RateLimitGuard）+ LoopDetector 升级（分类 + 元认知）
+- [ ] 04-03-PLAN.md — 4 层恢复 + Registry 过滤 + FSM 集成 + main.py 更新
 
 ### 阶段 5: 可观测性与 Web 前端
 **目标**: 事件总线、SSE 实时推流、React Web 前端展示、Token/成本追踪、会话历史浏览，以及完整的交互式演示
@@ -98,5 +100,5 @@
 | 1. Agent 核心循环 | 5/5 | 完成 | - |
 | 2. 工具系统与业务验证 | 4/4 | 完成 | - |
 | 3. 上下文管理 | 3/3 | 完成 | 2026-05-28 |
-| 4. 韧性与恢复 | 0/0 | 未开始 | - |
+| 4. 韧性与恢复 | 0/3 | 进行中 | - |
 | 5. 可观测性与 Web 前端 | 0/0 | 未开始 | - |
