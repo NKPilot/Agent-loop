@@ -18,12 +18,14 @@ export interface UIState {
   selectedToolCallId: string | null;
   pendingConfirmation: ConfirmationRequiredEvent | null;
   sseStatus: SSEStatus;
+  sseRetryCount: number;
 
   setActiveSession: (id: string) => void;
   selectToolCall: (id: string | null) => void;
   setPendingConfirmation: (event: ConfirmationRequiredEvent | null) => void;
   clearPendingConfirmation: () => void;
   setSSEStatus: (status: SSEStatus) => void;
+  setSSERetryCount: (count: number) => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────
@@ -33,6 +35,7 @@ export const useUIStore = create<UIState>()((set) => ({
   selectedToolCallId: null,
   pendingConfirmation: null,
   sseStatus: "connecting",
+  sseRetryCount: 0,
 
   setActiveSession: (id: string) =>
     set({ activeSessionId: id, selectedToolCallId: null }),
@@ -48,4 +51,7 @@ export const useUIStore = create<UIState>()((set) => ({
 
   setSSEStatus: (status: SSEStatus) =>
     set({ sseStatus: status }),
+
+  setSSERetryCount: (count: number) =>
+    set({ sseRetryCount: count }),
 }));
