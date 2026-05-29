@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock
 
 import pytest
 
 from loopai.state_machine.guards import (
     BudgetGuard,
+    CostGuard,
+    GuardPipeline,
+    GuardResult,
     LoopDetector,
     MessageValidator,
+    RateLimitGuard,
     TokenGuard,
     ValidationError,
 )
@@ -513,3 +518,150 @@ class TestTokenGuard:
         guard.check(messages)
 
         assert len(messages) == original_len
+
+
+# =============================================================================
+# GuardPipeline 测试
+# =============================================================================
+
+
+class TestGuardPipeline:
+    """GuardPipeline 管道测试 —— 3 个用例。"""
+
+    def test_all_ok(self) -> None:
+        """所有守卫返回 ok 时 Pipeline 返回 action="ok"。"""
+        guard1 = MagicMock()
+        guard1.check.return_value = GuardResult(action="ok", guard_name="Guard1")
+        guard2 = MagicMock()
+        guard2.check.return_value = GuardResult(action="ok", guard_name="Guard2")
+
+        pipeline = GuardPipeline([guard1, guard2])
+        result = pipeline.check([])
+
+        assert result.action == "ok"
+
+    def test_short_circuit_first_blocked(self) -> None:
+        """第二个守卫返回 blocked 时 Pipeline 不执行后续守卫。"""
+        guard1 = MagicMock()
+        guard1.check.return_value = GuardResult(action="ok", guard_name="Guard1")
+        guard2 = MagicMock()
+        guard2.check.return_value = GuardResult(
+            action="blocked", guard_name="CostGuard",
+            detail="Cost exceeded",
+        )
+        guard3 = MagicMock()
+
+        pipeline = GuardPipeline([guard1, guard2, guard3])
+        result = pipeline.check([])
+
+        assert result.action == "blocked"
+        assert result.guard_name == "CostGuard"
+        # 第三个守卫绝不应被调用
+        guard3.check.assert_not_called()
+
+    def test_compress_signal_passthrough(self) -> None:
+        """TokenGuard 返回 "compress" 元组时 Pipeline 透传。"""
+        counter = MagicMock()
+        counter.count_messages.return_value = 100000
+        token_guard = TokenGuard(counter, window_size=128000, threshold=0.75)
+        guard2 = MagicMock()
+        guard2.check.return_value = GuardResult(action="ok", guard_name="Guard2")
+
+        pipeline = GuardPipeline([token_guard, guard2])
+        result = pipeline.check([])
+
+        assert result.action == "compress"
+        assert result.guard_name == "TokenGuard"
+        # TokenGuard 返回 compress 后短路，guard2 不应被调用
+        guard2.check.assert_not_called()
+
+
+# =============================================================================
+# CostGuard 测试
+# =============================================================================
+
+
+class TestCostGuard:
+    """CostGuard 成本估算测试 —— 4 个用例。"""
+
+    def test_estimate_cost_within_budget(self) -> None:
+        """gpt-4o 1000 tokens 成本低于 0.05，返回 ok。"""
+        guard = CostGuard(max_cost_per_call=0.05)
+        result = guard.check([], token_count=1000, model_name="gpt-4o")
+
+        assert result.action == "ok"
+        assert result.guard_name == "CostGuard"
+
+    def test_estimate_cost_exceeds_budget(self) -> None:
+        """大量 token 触发 blocked。"""
+        # 50000 tokens at gpt-4o pricing:
+        # input: 35000 tokens * 0.0025/1k = 0.0875
+        # output: 15000 tokens * 0.01/1k = 0.15
+        # total = ~0.2375 > 0.05
+        guard = CostGuard(max_cost_per_call=0.05)
+        result = guard.check([], token_count=50000, model_name="gpt-4o")
+
+        assert result.action == "blocked"
+        assert result.guard_name == "CostGuard"
+        assert "exceeds" in (result.detail or "")
+
+    def test_model_prefix_matching(self) -> None:
+        """"gpt-4o-2024-08-06" 匹配到 "gpt-4o" 定价。"""
+        guard = CostGuard(max_cost_per_call=1.0)
+        # gpt-4o pricing: 0.0025/0.01 per 1k
+        cost = guard.estimate_cost(token_count=1000, model_name="gpt-4o-2024-08-06")
+
+        # 700 input * 0.0025/1k + 300 output * 0.01/1k = 0.00175 + 0.003 = 0.00475
+        assert cost == 0.00475
+
+    def test_unknown_model_falls_back(self) -> None:
+        """未知模型回退到 gpt-4o 定价。"""
+        guard = CostGuard(max_cost_per_call=1.0)
+        # Unknown model should fall back to gpt-4o pricing
+        cost = guard.estimate_cost(token_count=1000, model_name="claude-sonnet-4")
+
+        # Same as gpt-4o: 0.00475
+        assert cost == 0.00475
+
+
+# =============================================================================
+# RateLimitGuard 测试
+# =============================================================================
+
+
+class TestRateLimitGuard:
+    """RateLimitGuard 速率限制测试 —— 3 个用例。"""
+
+    def test_within_limit(self) -> None:
+        """调用次数在限制内返回 ok。"""
+        guard = RateLimitGuard(max_calls=3, window_seconds=60.0)
+
+        result = guard.check("get_weather")
+        assert result.action == "ok"
+
+    def test_exceeds_limit(self) -> None:
+        """超过限制后返回 blocked。"""
+        guard = RateLimitGuard(max_calls=3, window_seconds=60.0)
+
+        # 记录 3 次调用
+        guard.record_call("get_weather")
+        guard.record_call("get_weather")
+        guard.record_call("get_weather")
+
+        # 第 4 次 check 应被 blocked
+        result = guard.check("get_weather")
+        assert result.action == "blocked"
+        assert result.guard_name == "RateLimitGuard"
+        assert "rate limit exceeded" in (result.detail or "")
+
+    def test_window_prunes_old_entries(self) -> None:
+        """旧时间戳被修剪，不再计数。"""
+        guard = RateLimitGuard(max_calls=1, window_seconds=60.0)
+
+        # 预先填充旧时间戳（回溯到窗口外部）
+        old_time = time.monotonic() - 300  # 5 分钟前
+        guard._call_times["get_weather"] = [old_time]
+
+        # check 应修剪旧条目，因此不会超过限制
+        result = guard.check("get_weather")
+        assert result.action == "ok"

@@ -11,8 +11,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
+import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -495,3 +499,229 @@ class TokenGuard:
         if token_count >= threshold_tokens:
             return ("compress", token_count, threshold_tokens)
         return ("ok", token_count, threshold_tokens)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GuardResult — 守卫管道结果数据类
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class GuardResult:
+    """Result of a guard check in the pipeline.
+
+    Attributes:
+        action: "ok" (all clear), "compress" (compression needed from TokenGuard),
+                "blocked" (guard violation), "warn" (approaching limit).
+        guard_name: Name of the guard class that produced this result.
+        detail: Human-readable detail message for the blocking guard.
+    """
+
+    action: str
+    guard_name: str | None = None
+    detail: str | None = None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CostGuard — 成本估算守卫
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class CostGuard:
+    """Cost estimation guard — estimates LLM call cost from token count.
+
+    Uses a hardcoded model pricing table. Returns a signal when estimated
+    cost exceeds the per-call budget.
+
+    Attributes:
+        model_cost_per_1k: Dict mapping model prefix to (input_cost_per_1k, output_cost_per_1k).
+        max_cost_per_call: Maximum allowed cost per LLM call in USD (default 0.05).
+    """
+
+    _DEFAULT_PRICING: dict[str, tuple[float, float]] = {
+        "gpt-4o": (0.0025, 0.01),
+        "gpt-4o-mini": (0.00015, 0.0006),
+        "gpt-4": (0.03, 0.06),
+        "gpt-4-turbo": (0.01, 0.03),
+        "gpt-3.5-turbo": (0.0005, 0.0015),
+    }
+
+    def __init__(
+        self,
+        max_cost_per_call: float = 0.05,
+        pricing: dict[str, tuple[float, float]] | None = None,
+    ) -> None:
+        self.max_cost_per_call = max_cost_per_call
+        self._pricing = pricing or dict(self._DEFAULT_PRICING)
+
+    def estimate_cost(self, token_count: int, model_name: str = "gpt-4o") -> float:
+        """Estimate cost for a single LLM call.
+
+        Uses model prefix matching (e.g., "gpt-4o-2024-08-06" matches "gpt-4o").
+        If model not found in pricing table, uses gpt-4o pricing as fallback.
+
+        Returns estimated cost in USD (rounded to 6 decimal places).
+        """
+        input_cost, output_cost = self._get_rates(model_name)
+        # Conservative estimate: assume output is ~30% of total tokens
+        input_tokens = int(token_count * 0.7)
+        output_tokens = token_count - input_tokens
+        cost = (input_tokens / 1000) * input_cost + (output_tokens / 1000) * output_cost
+        return round(cost, 6)
+
+    def _get_rates(self, model_name: str) -> tuple[float, float]:
+        """Look up pricing rates for a model name with prefix matching."""
+        for prefix, rates in self._pricing.items():
+            if model_name.startswith(prefix):
+                return rates
+        return self._pricing.get("gpt-4o", (0.0025, 0.01))
+
+    def check(self, messages: list[dict], token_count: int | None = None,
+              model_name: str = "gpt-4o") -> GuardResult:
+        """Check if estimated cost is within budget.
+
+        Args:
+            messages: Message list (used if token_count not provided — unused in this version).
+            token_count: Pre-computed token count. If None, uses len(messages) * 500 as rough estimate.
+            model_name: Model name for pricing lookup.
+
+        Returns:
+            GuardResult with action="ok" if cost within budget, or "blocked" if over budget.
+        """
+        if token_count is None:
+            token_count = max(len(messages) * 500, 1000)  # Rough estimate fallback
+
+        cost = self.estimate_cost(token_count, model_name)
+        if cost > self.max_cost_per_call:
+            return GuardResult(
+                action="blocked",
+                guard_name="CostGuard",
+                detail=(
+                    f"Estimated cost ${cost:.6f} exceeds limit "
+                    f"${self.max_cost_per_call:.4f}"
+                ),
+            )
+        return GuardResult(action="ok", guard_name="CostGuard")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RateLimitGuard — 工具调用频率限制
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class RateLimitGuard:
+    """Rate limit guard — limits tool call frequency within a time window.
+
+    Uses a sliding time window (not sliding count) per tool.
+    Tracks call timestamps and blocks if calls exceed the limit within the window.
+
+    Attributes:
+        max_calls: Maximum allowed calls within the time window (default 10).
+        window_seconds: Time window in seconds (default 60.0).
+    """
+
+    def __init__(self, max_calls: int = 10, window_seconds: float = 60.0) -> None:
+        self.max_calls = max_calls
+        self.window_seconds = window_seconds
+        self._call_times: dict[str, list[float]] = {}  # tool_name -> [timestamps]
+
+    def check(self, tool_name: str) -> GuardResult:
+        """Check if tool has exceeded its rate limit.
+
+        Args:
+            tool_name: The tool to check rate limit for.
+
+        Returns:
+            GuardResult with action="ok" if within limit, "blocked" if exceeded.
+        """
+        now = time.monotonic()
+        timestamps = self._call_times.get(tool_name, [])
+
+        # Prune timestamps outside the window
+        cutoff = now - self.window_seconds
+        active = [t for t in timestamps if t >= cutoff]
+        self._call_times[tool_name] = active
+
+        if len(active) >= self.max_calls:
+            oldest = active[0] if active else now
+            retry_after = round(self.window_seconds - (now - oldest), 1)
+            return GuardResult(
+                action="blocked",
+                guard_name="RateLimitGuard",
+                detail=(
+                    f"Tool '{tool_name}' rate limit exceeded: "
+                    f"{len(active)} calls in {self.window_seconds}s window. "
+                    f"Retry after {retry_after}s."
+                ),
+            )
+        return GuardResult(action="ok", guard_name="RateLimitGuard")
+
+    def record_call(self, tool_name: str) -> None:
+        """Record a tool call for rate limiting.
+
+        Must be called after the tool executes to update the rate counter.
+        """
+        if tool_name not in self._call_times:
+            self._call_times[tool_name] = []
+        self._call_times[tool_name].append(time.monotonic())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GuardPipeline — 顺序守卫管道，短路由机制
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class GuardPipeline:
+    """Sequential guard pipeline with short-circuit on first non-ok result.
+
+    Runs each guard's check() in order. If any guard returns action != "ok",
+    the pipeline short-circuits and returns that guard's result immediately.
+
+    Guards are injected as callables. The pipeline normalizes different
+    return types: GuardResult objects (CostGuard, RateLimitGuard) and
+    tuples (TokenGuard returning (action, count, threshold)).
+    """
+
+    def __init__(self, guards: list[Any]) -> None:
+        self._guards = guards
+
+    def check(self, messages: list[dict]) -> GuardResult:
+        """Run each guard sequentially. Short-circuit on first non-ok result.
+
+        Args:
+            messages: The current message list (passed to each guard).
+
+        Returns:
+            GuardResult from the first blocking guard, or GuardResult(action="ok")
+            if all guards pass.
+        """
+        for guard in self._guards:
+            raw = guard.check(messages)
+
+            # Normalize: handle both GuardResult objects and tuple returns
+            if isinstance(raw, GuardResult):
+                result = raw
+            elif isinstance(raw, tuple):
+                action = raw[0]
+                name = guard.__class__.__name__
+                if action == "ok":
+                    result = GuardResult(action="ok", guard_name=name)
+                elif action == "compress":
+                    result = GuardResult(
+                        action="compress",
+                        guard_name=name,
+                        detail=f"Token count {raw[1]} >= threshold {raw[2]}",
+                    )
+                else:
+                    result = GuardResult(
+                        action="blocked",
+                        guard_name=name,
+                        detail=f"Guard returned action={action}",
+                    )
+            else:
+                result = GuardResult(action="ok", guard_name=guard.__class__.__name__)
+
+            if result.action != "ok":
+                return result
+
+        return GuardResult(action="ok")
