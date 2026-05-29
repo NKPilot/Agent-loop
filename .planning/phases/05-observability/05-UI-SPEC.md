@@ -86,14 +86,14 @@ Font stack: `'Inter', system-ui, -apple-system, sans-serif` (shadcn default).
 
 | Role | Applied To |
 |------|-----------|
-| Body (14px) | Timeline step reasoning text, tool result content, session list item descriptions, dialog body text |
+| Body (14px) | Timeline step reasoning text, tool result content, session list item descriptions, dialog body text, tool arguments, tool results, token/cost numbers, raw event JSON (monospace: `font-mono` at same 14px size) |
 | Label (12px) | Status badges, step numbers, timestamps, token counts, tool call IDs, metadata captions |
 | Heading (20px) | Panel section titles (e.g. "Agent Timeline", "Tool Details"), card titles, dialog titles |
 | Display (28px) | Page title ("Observability Dashboard"), session detail header |
 
-**Monospace exceptions:** Tool arguments, tool results, token/cost numbers, and raw event JSON use `font-mono` (JetBrains Mono or system monospace fallback) at 13px for code-like content.
+**Monospace exceptions:** Tool arguments, tool results, token/cost numbers, and raw event JSON use `font-mono` (JetBrains Mono or system monospace fallback) at 14px (same as body size) for code-like content.
 
-Source: shadcn/ui default typography scale (text-sm, text-xs, text-xl, text-2xl). Monospace is a Claude's Discretion addition for technical data clarity.
+Source: shadcn/ui default typography scale (text-sm, text-xs, text-xl, text-2xl). Monospace is a Claude's Discretion addition for technical data clarity. Total: exactly 4 font sizes (12, 14, 20, 28px).
 
 ---
 
@@ -140,6 +140,8 @@ Source: shadcn/ui default theme + two custom semantic tokens (success green, war
 ---
 
 ## Layout Contract
+
+**Primary focal point:** The Agent Timeline center panel, specifically the most recent active step's streaming reasoning text content, followed by the live step indicator badge. The user's eye should land here first on page load. Secondary focal points are the session list active item (left panel, accent-highlighted) and the tool detail panel when a tool call is in progress (right panel, animated slide-in).
 
 ### Three-Panel Structure (Decision D-01)
 
@@ -241,8 +243,8 @@ Source: Decision D-01 from CONTEXT.md, component mapping is Claude's Discretion.
 | Dialog title | "Dangerous Command Detected" |
 | Icon | `AlertTriangle` (lucide-react) in destructive color |
 | Body | Shows tool name, full command text (monospace, scrollable), reason for flagging |
-| Approve button | "Approve" -- solid destructive variant |
-| Reject button | "Reject" -- outline variant |
+| Approve button | "Approve Command" -- solid destructive variant |
+| Reject button | "Reject Command" -- outline variant |
 | Auto-timeout | None -- user must explicitly choose |
 | After action | Dialog closes, timeline shows the confirmation response event |
 
@@ -279,10 +281,10 @@ Source: Claude's Discretion (D-05 lists full feature delivery but leaves interac
 | **Empty state body** | "Start your first agent session to see real-time reasoning steps, tool calls, and token usage right here. Every step the agent takes will appear in the timeline as it happens." |
 | **Empty state (no tool selected)** | "Select a tool call" -- subtitle: "Click any tool call in the timeline to view its arguments, result, and performance metrics." |
 | **Error state -- connection** | "Connection Lost" -- body: "The live stream was interrupted. Reconnecting automatically..." with attempt counter and "Retry Now" button |
-| **Error state -- agent error** | "Agent Error" -- body: "The agent encountered an error and stopped. View the timeline for details." with "Dismiss" button |
+| **Error state -- agent error** | "Agent Error" -- body: "The agent encountered an error and stopped. View the timeline for details." with "Dismiss Error" button |
 | **Error state -- session load failed** | "Failed to Load Session" -- body: "The session data could not be retrieved. The JSONL file may be missing or corrupted." with "Go Back" button |
 | **Destructive -- delete session** | Confirmation heading: "Delete Session?" -- body: "This session and all its recorded steps, tool results, and token data will be permanently removed. This action cannot be undone." -- Confirm button: "Delete Session" (destructive variant) |
-| **Destructive -- dangerous command** | Confirmation heading: "Dangerous Command" -- body: "The agent wants to execute a potentially dangerous command. Review the command below and approve or reject it." -- Approve: "Approve" / Reject: "Reject" |
+| **Destructive -- dangerous command** | Confirmation heading: "Dangerous Command" -- body: "The agent wants to execute a potentially dangerous command. Review the command below and approve or reject it." -- Approve: "Approve Command" / Reject: "Reject Command" |
 | **Loading -- timeline** | "Loading session data..." with skeleton placeholder cards |
 | **Loading -- session list** | Skeleton list items (3-5 rows) with pulsing animation |
 | **Streaming indicator** | "Agent is thinking..." with animated ellipsis during LLMToken streaming |
