@@ -1,0 +1,71 @@
+"""Pydantic API response models for the loopAI FastAPI server.
+
+Defines request and response schemas for session management,
+SSE streaming, and agent control endpoints.
+"""
+
+from pydantic import BaseModel
+
+
+class SessionSummary(BaseModel):
+    """Lightweight session metadata for list endpoints."""
+
+    id: str
+    created_at: str
+    step_count: int
+    status: str
+    exit_reason: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class SessionListResponse(BaseModel):
+    """Response model for GET /api/sessions."""
+
+    sessions: list[SessionSummary]
+
+
+class SessionDetailResponse(BaseModel):
+    """Response model for GET /api/sessions/{id}.
+
+    The session dict contains the full session data including
+    id, events list, and any metadata.
+    """
+
+    session: dict
+
+
+class StartSessionRequest(BaseModel):
+    """Request body for POST /api/sessions/start."""
+
+    prompt: str
+    max_steps: int = 15
+
+
+class StartSessionResponse(BaseModel):
+    """Response model for POST /api/sessions/start."""
+
+    session_id: str
+
+
+class ConfirmRequest(BaseModel):
+    """Request body for POST /api/sessions/{id}/confirm/{confirmation_id}."""
+
+    approved: bool
+
+
+class DeleteResponse(BaseModel):
+    """Response model for DELETE /api/sessions/{id}."""
+
+    deleted: bool
+
+
+__all__ = [
+    "SessionSummary",
+    "SessionListResponse",
+    "SessionDetailResponse",
+    "StartSessionRequest",
+    "StartSessionResponse",
+    "ConfirmRequest",
+    "DeleteResponse",
+]
