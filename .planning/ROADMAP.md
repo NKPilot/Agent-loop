@@ -77,8 +77,8 @@
 **计划**: 3 plans
 **Plans:**
 - [x] 04-01-PLAN.md — 韧性子系统基础：事件 Schema + CheckpointManager + FailureRegistry + CircuitBreaker
-- [ ] 04-02-PLAN.md — 守卫管道（GuardPipeline + CostGuard + RateLimitGuard）+ LoopDetector 升级（分类 + 元认知）
-- [ ] 04-03-PLAN.md — 4 层恢复 + Registry 过滤 + FSM 集成 + main.py 更新
+- [x] 04-02-PLAN.md — 守卫管道（GuardPipeline + CostGuard + RateLimitGuard）+ LoopDetector 升级（分类 + 元认知）
+- [x] 04-03-PLAN.md — 4 层恢复 + Registry 过滤 + FSM 集成 + main.py 更新
 
 ### 阶段 5: 可观测性与 Web 前端
 **目标**: 事件总线、SSE 实时推流、React Web 前端展示、Token/成本追踪、会话历史浏览，以及完整的交互式演示
