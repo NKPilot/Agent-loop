@@ -1,2 +1,5 @@
 """Resilience and recovery package — checkpoint, circuit breaker, failure registry."""
-__all__: list[str] = []
+from loopai.resilience.checkpoint import CheckpointManager
+from loopai.resilience.failure_registry import FailureRegistry
+
+__all__ = ["CheckpointManager", "FailureRegistry"]
