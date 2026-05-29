@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 import time
 from datetime import datetime, timezone
@@ -37,7 +38,13 @@ from pydantic import ValidationError
 
 from loopai.tools.errors import classify_error
 from loopai.tools.registry import ToolRegistry
-from loopai.tools.types import ErrorCategory, ToolMetadata, ToolResult
+from loopai.tools.types import (
+    ErrorCategory,
+    RecoveryConfig,
+    RecoveryLayer,
+    ToolMetadata,
+    ToolResult,
+)
 
 # Overflow threshold for tool output (80K characters)
 _OVERFLOW_THRESHOLD_CHARS = 80 * 1024
@@ -62,8 +69,10 @@ class ToolExecutor:
             print(f"Tool failed: {result.error_message}")
     """
 
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(self, registry: ToolRegistry,
+                 recovery_config: RecoveryConfig | None = None) -> None:
         self._registry = registry
+        self._recovery_cfg = recovery_config or RecoveryConfig()
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -108,9 +117,9 @@ class ToolExecutor:
         else:
             validated_args = dict(args)
 
-        # Step 2: Execute with retry (D-12, D-13)
-        return await self._execute_with_retry(metadata, validated_args,
-                                               session_id, tool_call_id)
+        # Step 2: Execute with recovery (D-12, D-13, D-04)
+        return await self._execute_with_recovery(metadata, validated_args,
+                                                  session_id, tool_call_id)
 
     # ── Retry loop ──────────────────────────────────────────────────
 
@@ -174,6 +183,132 @@ class ToolExecutor:
             error_msg="Retry attempts exhausted with no result",
             duration_ms=0.0,
         )
+
+    # ── 4-layer recovery pipeline ───────────────────────────────────
+
+    async def _execute_with_recovery(
+        self, metadata: ToolMetadata, validated_args: dict,
+        session_id: str = "", tool_call_id: str = "",
+    ) -> ToolResult:
+        """Execute tool with 4-layer recovery escalation (D-03, D-04).
+
+        Layer 1 — Cosmetic repair: fix JSON formatting errors in arguments.
+        Layer 2 — In-context: handled at FSM level (structured error -> LLM re-call).
+        Layer 3 — Backoff: existing exponential backoff + jitter from RetryConfig.
+        Layer 4 — Human escalation: publish event, return error result.
+        """
+        # ── Layer 1: Cosmetic repair ──────────────────────────────────
+        for attempt in range(self._recovery_cfg.cosmetic_max_attempts):
+            try:
+                result = await self._execute_once(metadata, validated_args,
+                                                   session_id, tool_call_id)
+                return result  # Success -> return immediately
+            except (json.JSONDecodeError, TypeError) as exc:
+                # Attempt cosmetic repair on first attempt
+                if attempt == 0:
+                    repaired = self._cosmetic_repair(validated_args, exc)
+                    if repaired is not None:
+                        validated_args = repaired
+                        continue
+                # Cannot repair -> escalate
+                return ToolResult.error(
+                    error_msg=f"Layer 1 (cosmetic) exhausted: {exc}",
+                    duration_ms=0.0,
+                )
+            except (TimeoutError, ConnectionError, asyncio.TimeoutError):
+                # Network/timeout issues -> not cosmetic, fall through to Layer 3
+                break
+            except Exception as exc:
+                # Other exceptions -> check category
+                cat = classify_error(exc)
+                if cat == ErrorCategory.TRANSIENT:
+                    break  # Fall through to Layer 3
+                # TOOL_EXECUTION or GUARD_VIOLATION -> return error
+                return ToolResult.error(
+                    error_msg=f"{cat.value}: {exc}",
+                    duration_ms=0.0,
+                )
+
+        # ── Layer 3: Full retry + backoff (existing logic) ────────────
+        last_result: ToolResult | None = None
+        retry_config = metadata.retry
+
+        for attempt in range(retry_config.max_attempts):
+            try:
+                result = await self._execute_once(metadata, validated_args,
+                                                   session_id, tool_call_id)
+                return result  # Success
+            except Exception as exc:
+                category = classify_error(exc)
+
+                if category == ErrorCategory.FATAL:
+                    raise  # Fatal -> terminate session
+
+                if category == ErrorCategory.TRANSIENT:
+                    msg = (f"Transient error "
+                           f"(attempt {attempt + 1}/{retry_config.max_attempts}): {exc}")
+                    last_result = ToolResult.error(error_msg=msg, duration_ms=0.0)
+                    if attempt < retry_config.max_attempts - 1:
+                        delay = retry_config.compute_delay(attempt)
+                        await asyncio.sleep(delay)
+                    continue
+
+                # TOOL_EXECUTION or GUARD_VIOLATION -> no retry
+                return ToolResult.error(
+                    error_msg=f"{category.value}: {exc}",
+                    duration_ms=0.0,
+                )
+
+        # Layer 3 exhausted or last_result set from transient retries
+        if last_result is not None:
+            result_for_layer4 = last_result
+        else:
+            result_for_layer4 = ToolResult.error(
+                error_msg="Layer 3 (backoff) exhausted with no result",
+                duration_ms=0.0,
+            )
+
+        # ── Layer 4: Human escalation ─────────────────────────────────
+        return result_for_layer4  # FSM layer handles escalation
+
+    # ── Cosmetic repair ──────────────────────────────────────────────
+
+    def _cosmetic_repair(
+        self, validated_args: dict, exception: Exception
+    ) -> dict | None:
+        """Attempt cosmetic repair of tool arguments based on the exception type.
+
+        Current repairs:
+        - TypeError: Check for common type mismatches and coerce
+
+        Args:
+            validated_args: The current argument dict.
+            exception: The exception that was raised.
+
+        Returns:
+            Repaired argument dict, or None if repair not possible.
+        """
+        # TypeError: try numeric string -> number coercion
+        if isinstance(exception, TypeError):
+            repaired = dict(validated_args)
+            for key, value in repaired.items():
+                if isinstance(value, str):
+                    # Try int conversion
+                    try:
+                        repaired[key] = int(value)
+                        continue
+                    except (ValueError, TypeError):
+                        pass
+                    # Try float conversion
+                    try:
+                        repaired[key] = float(value)
+                        continue
+                    except (ValueError, TypeError):
+                        pass
+            if repaired != validated_args:
+                return repaired
+
+        return None
 
     # ── Single execution attempt ────────────────────────────────────
 

@@ -104,8 +104,14 @@ class ToolRegistry:
 
     # ── Schema export ─────────────────────────────────────────────
 
-    def get_schemas(self) -> list[dict]:
+    def get_schemas(self, exclude_open: set[str] | None = None) -> list[dict]:
         """Return OpenAI function-calling JSON Schemas for all registered tools.
+
+        Args:
+            exclude_open: Optional set of tool names to exclude (e.g., circuit-broken tools).
+
+        Returns:
+            List of OpenAI-compatible tool schema dicts, minus excluded tools.
 
         Each element is a dict with shape::
 
@@ -117,11 +123,11 @@ class ToolRegistry:
                     "parameters": {...}
                 }
             }
-
-        Returns:
-            List of OpenAI-compatible tool schema dicts.
         """
-        return [meta.to_openai_schema() for meta in self._tools.values()]
+        tools = self._tools.values()
+        if exclude_open:
+            tools = [m for m in tools if m.name not in exclude_open]
+        return [meta.to_openai_schema() for meta in tools]
 
     # ── Introspection ─────────────────────────────────────────────
 

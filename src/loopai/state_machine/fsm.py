@@ -20,12 +20,17 @@ if TYPE_CHECKING:
     from loopai.context.compressor import ContextCompressor
     from loopai.events.bus import EventBus
     from loopai.llm.client import LLMClient
+    from loopai.resilience.checkpoint import CheckpointManager
+    from loopai.resilience.circuit_breaker import CircuitBreaker, CircuitState
+    from loopai.resilience.failure_registry import FailureRegistry
     from loopai.session.context import Session
     from loopai.state_machine.guards import (
         BudgetGuard,
+        GuardPipeline,
         LoopDetector,
         MessageValidator,
         PermissionGuard,
+        RateLimitGuard,
         TokenGuard,
     )
     from loopai.tools.executor import ToolExecutor
@@ -64,8 +69,15 @@ class ReActFSM:
         executor: ToolExecutor,
         permission_guard: PermissionGuard,
         *,
+        # Phase 3
         token_guard: TokenGuard | None = None,
         compressor: ContextCompressor | None = None,
+        # Phase 4 (new)
+        guard_pipeline: GuardPipeline | None = None,
+        checkpoint_manager: CheckpointManager | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
+        failure_registry: FailureRegistry | None = None,
+        rate_limit_guard: RateLimitGuard | None = None,
     ) -> None:
         self.client = client
         self.bus = bus
@@ -77,8 +89,17 @@ class ReActFSM:
         self.permission_guard = permission_guard
         self.token_guard = token_guard
         self.compressor = compressor
+        self.guard_pipeline = guard_pipeline
+        self.checkpoint_manager = checkpoint_manager
+        self.circuit_breaker = circuit_breaker
+        self.failure_registry = failure_registry
+        self.rate_limit_guard = rate_limit_guard
         self._exit_reason = "completed"
         self._last_act_failed = False
+
+        # Track recovery layers for Layer 2 (in-context retry)
+        self._layer2_retry_count: dict[str, int] = {}  # tool_call_id -> attempts
+        self._layer2_max_attempts = 2
 
     async def run(self, session: Session) -> Session:
         """Execute the ReAct loop until FINISH or ERROR state.
@@ -94,6 +115,7 @@ class ReActFSM:
             The same Session object, now in FINISH or ERROR state.
         """
         while session.state not in (AgentState.FINISH, AgentState.ERROR):
+            prev_state = session.state
             if session.state == AgentState.REASON:
                 await self._handle_reason(session)
             elif session.state == AgentState.ACT:
@@ -103,6 +125,10 @@ class ReActFSM:
             else:
                 session.state = AgentState.ERROR
                 self._exit_reason = "unknown_state"
+
+            # Checkpoint after every state transition (RES-01)
+            if self.checkpoint_manager is not None:
+                self.checkpoint_manager.save(session)
 
         # Always publish SessionEnd before returning
         await self.bus.publish(
@@ -146,6 +172,33 @@ class ReActFSM:
         try:
             # Guard: validate message structure before LLM call
             self.message_validator.validate(session.messages)
+
+            # Phase 4: GuardPipeline — sequential guard check (RES-04)
+            if self.guard_pipeline is not None:
+                pipeline_result = self.guard_pipeline.check(session.messages)
+                if pipeline_result.action == "blocked":
+                    # Inject guard violation feedback into session
+                    session.add_message(
+                        "system",
+                        content=(
+                            f"[{pipeline_result.guard_name}] {pipeline_result.detail}. "
+                            "请调整策略后重试。"
+                        ),
+                    )
+                    # Publish guard violation event
+                    await self.bus.publish(
+                        "guard_violation",
+                        {
+                            "event_type": "guard_violation",
+                            "session_id": session.session_id,
+                            "step_num": step_num,
+                            "guard_name": pipeline_result.guard_name or "",
+                            "detail": pipeline_result.detail or "",
+                        },
+                    )
+                    # Stay in REASON but injected system message constrains LLM
+                elif pipeline_result.action == "compress" and self.compressor is not None:
+                    pass  # TokenGuard will trigger compression in Phase 3 code block
 
             # TokenGuard: check token budget before LLM call (Phase 3)
             if self.token_guard is not None:
@@ -194,7 +247,11 @@ class ReActFSM:
             session.increment_step()
 
             # LLM call with (possibly modified) messages and registered tools
-            tool_schemas = self.registry.get_schemas() if self.registry else None
+            # Phase 4: Circuit breaker filtering — exclude OPEN tools from LLM schema
+            open_tools: set[str] | None = None
+            if self.circuit_breaker is not None:
+                open_tools = self.circuit_breaker.get_open_tools()
+            tool_schemas = self.registry.get_schemas(exclude_open=open_tools) if self.registry else None
             response = await self.client.complete(
                 messages,
                 tools=tool_schemas,
@@ -303,8 +360,8 @@ class ReActFSM:
                 except _json.JSONDecodeError:
                     raw_args = {}
 
-            # Guard: loop detection (Phase 1 — unchanged)
-            should_proceed, loop_action = self.loop_detector.check(
+            # Guard: loop detection (Phase 4 — enhanced 3-tuple return)
+            should_proceed, loop_action, _loop_class = self.loop_detector.check(
                 tool_name, raw_args
             )
 
@@ -341,6 +398,38 @@ class ReActFSM:
                 continue
 
             # ── Phase 2: Real tool pipeline ──────────────────────────
+
+            # Phase 4: FailureRegistry check (RES-03)
+            if self.failure_registry is not None:
+                sig = self.loop_detector._signature(
+                    tool_name, raw_args if isinstance(raw_args, dict) else {}
+                )
+                if self.failure_registry.should_skip(tool_name, sig):
+                    session.add_message(
+                        "tool",
+                        content=(
+                            f"[SYSTEM] 操作 '{tool_name}(...)' 之前已失败并被注册。"
+                            "请尝试不同的方法或参数。"
+                        ),
+                        tool_call_id=tool_call_id,
+                    )
+                    any_blocked = True
+                    continue
+
+            # Phase 4: CircuitBreaker check (RES-06)
+            if self.circuit_breaker is not None:
+                allowed, cb_state = self.circuit_breaker.check(tool_name)
+                if not allowed:
+                    session.add_message(
+                        "tool",
+                        content=(
+                            f"[SYSTEM] 工具 '{tool_name}' 当前不可用 "
+                            f"(熔断器状态: {cb_state.value})。请尝试其他方法。"
+                        ),
+                        tool_call_id=tool_call_id,
+                    )
+                    any_blocked = True
+                    continue
 
             # Step 1: Look up tool in registry
             metadata = self.registry.get(tool_name)
@@ -387,6 +476,27 @@ class ReActFSM:
 
             # Step 3: Execute the tool via ToolExecutor
             result = await self.executor.execute(tool_name, raw_args)
+
+            # Phase 4: CircuitBreaker record (RES-06)
+            if self.circuit_breaker is not None:
+                await self.circuit_breaker.record_with_session(
+                    tool_name, success=not result.is_error,
+                    session_id=session.session_id, bus=self.bus,
+                )
+
+            # Phase 4: FailureRegistry record on non-transient errors (RES-03)
+            if self.failure_registry is not None and result.is_error:
+                sig = self.loop_detector._signature(
+                    tool_name, raw_args if isinstance(raw_args, dict) else {}
+                )
+                self.failure_registry.record(
+                    tool_name, sig,
+                    result.error_message or "Unknown error",
+                )
+
+            # Phase 4: RateLimitGuard record (RES-04)
+            if self.rate_limit_guard is not None and not result.is_error:
+                self.rate_limit_guard.record_call(tool_name)
 
             # Step 4: Publish ToolResult event
             await self.bus.publish(
