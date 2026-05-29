@@ -44,9 +44,11 @@ def create_app() -> FastAPI:
 
     # API routes — stream router is mounted here; sessions and control routers
     # will be added in subsequent plans.
-    from loopai.api.routes import stream  # noqa: E402
+    from loopai.api.routes import control, sessions, stream  # noqa: E402
 
     app.include_router(stream.router, prefix="/api")
+    app.include_router(sessions.router, prefix="/api")
+    app.include_router(control.router, prefix="/api")
 
     return app
 
