@@ -29,6 +29,8 @@ export interface CostRates {
   completionPer1K: number;
 }
 
+export type SSEStatus = "connected" | "connecting" | "reconnecting" | "failed";
+
 // ── Base event ────────────────────────────────────────────────────────
 
 export interface EventBase {
