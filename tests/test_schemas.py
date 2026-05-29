@@ -8,11 +8,16 @@ from pydantic import TypeAdapter
 from loopai.events.schemas import (
     BudgetExhausted,
     BudgetWarning,
+    CheckpointSaved,
+    CircuitClosed,
+    CircuitOpened,
     ConfirmationRequired,
     ConfirmationResponse,
     ContextCompacted,
     Error,
+    EscalationRequired,
     Event,
+    FailureRegistered,
     LLMContentDone,
     LLMToken,
     LoopDetected,
@@ -100,7 +105,7 @@ class TestEventDiscriminatedUnion:
 
 
 class TestAllEventsUniqueType:
-    """Verify all 13 event_type values are unique."""
+    """Verify all 22 event_type values are unique."""
 
     def test_all_events_have_unique_type(self):
         event_classes = [
@@ -117,8 +122,15 @@ class TestAllEventsUniqueType:
             BudgetExhausted,
             LoopDetected,
             Error,
+            ConfirmationRequired,
+            ConfirmationResponse,
             ContextCompacted,
             TokenWarning,
+            CheckpointSaved,
+            CircuitOpened,
+            CircuitClosed,
+            FailureRegistered,
+            EscalationRequired,
         ]
         # Instantiate each with minimal required fields to get event_type
         event_types = set()
@@ -159,6 +171,15 @@ class TestAllEventsUniqueType:
             if cls is Error:
                 kwargs["error_type"] = "RuntimeError"
                 kwargs["message"] = "test error"
+            if cls is ConfirmationRequired:
+                kwargs["confirmation_id"] = "c1"
+                kwargs["tool_name"] = "test"
+                kwargs["tool_args"] = {}
+                kwargs["permission_level"] = "dangerous"
+                kwargs["reason"] = "test"
+            if cls is ConfirmationResponse:
+                kwargs["confirmation_id"] = "c1"
+                kwargs["approved"] = True
             if cls is ContextCompacted:
                 kwargs["tokens_before"] = 10000
                 kwargs["tokens_after"] = 5000
@@ -170,11 +191,39 @@ class TestAllEventsUniqueType:
                 kwargs["max_tokens"] = 128000
                 kwargs["used_pct"] = 0.75
                 kwargs["action"] = "compress"
+            if cls is CheckpointSaved:
+                del kwargs["step_num"]
+                kwargs["step_count"] = 1
+                kwargs["file_path"] = "/tmp/test.ckpt.jsonl"
+                kwargs["state"] = "reason"
+            if cls is CircuitOpened:
+                del kwargs["step_num"]
+                kwargs["tool_name"] = "test"
+                kwargs["failure_rate"] = 0.6
+                kwargs["window_size"] = 10
+                kwargs["previous_state"] = "closed"
+                kwargs["new_state"] = "open"
+            if cls is CircuitClosed:
+                del kwargs["step_num"]
+                kwargs["tool_name"] = "test"
+                kwargs["previous_state"] = "half_open"
+                kwargs["new_state"] = "closed"
+            if cls is FailureRegistered:
+                del kwargs["step_num"]
+                kwargs["tool_name"] = "test"
+                kwargs["signature"] = "abc123def4567890"
+                kwargs["error_message"] = "test error"
+            if cls is EscalationRequired:
+                del kwargs["step_num"]
+                kwargs["tool_name"] = "test"
+                kwargs["layer"] = 4
+                kwargs["attempt_count"] = 5
+                kwargs["error_message"] = "max retries exceeded"
 
             event = cls(**kwargs)
             event_types.add(event.event_type)
 
-        assert len(event_types) == 15, f"Expected 15 unique event types, got {len(event_types)}: {event_types}"
+        assert len(event_types) == 22, f"Expected 22 unique event types, got {len(event_types)}: {event_types}"
 
 
 class TestJsonSerialization:
@@ -436,9 +485,9 @@ class TestNewEventsDiscriminatedUnion:
 
 
 class TestUpdatedEventTypeCount:
-    """Verify all event_type values are unique (now 15 events)."""
+    """Verify all event_type values are unique (now 22 events)."""
 
-    def test_all_events_have_unique_type_17(self):
+    def test_all_events_have_unique_type_22(self):
         event_classes = [
             StepStart,
             StepEnd,
@@ -457,6 +506,11 @@ class TestUpdatedEventTypeCount:
             ConfirmationResponse,
             ContextCompacted,
             TokenWarning,
+            CheckpointSaved,
+            CircuitOpened,
+            CircuitClosed,
+            FailureRegistered,
+            EscalationRequired,
         ]
         event_types = set()
         for cls in event_classes:
@@ -515,8 +569,36 @@ class TestUpdatedEventTypeCount:
                 kwargs["max_tokens"] = 128000
                 kwargs["used_pct"] = 0.75
                 kwargs["action"] = "compress"
+            if cls is CheckpointSaved:
+                del kwargs["step_num"]
+                kwargs["step_count"] = 1
+                kwargs["file_path"] = "/tmp/test.ckpt.jsonl"
+                kwargs["state"] = "reason"
+            if cls is CircuitOpened:
+                del kwargs["step_num"]
+                kwargs["tool_name"] = "test"
+                kwargs["failure_rate"] = 0.6
+                kwargs["window_size"] = 10
+                kwargs["previous_state"] = "closed"
+                kwargs["new_state"] = "open"
+            if cls is CircuitClosed:
+                del kwargs["step_num"]
+                kwargs["tool_name"] = "test"
+                kwargs["previous_state"] = "half_open"
+                kwargs["new_state"] = "closed"
+            if cls is FailureRegistered:
+                del kwargs["step_num"]
+                kwargs["tool_name"] = "test"
+                kwargs["signature"] = "abc123def4567890"
+                kwargs["error_message"] = "test error"
+            if cls is EscalationRequired:
+                del kwargs["step_num"]
+                kwargs["tool_name"] = "test"
+                kwargs["layer"] = 4
+                kwargs["attempt_count"] = 5
+                kwargs["error_message"] = "max retries exceeded"
 
             event = cls(**kwargs)
             event_types.add(event.event_type)
 
-        assert len(event_types) == 17, f"Expected 17 unique event types, got {len(event_types)}: {event_types}"
+        assert len(event_types) == 22, f"Expected 22 unique event types, got {len(event_types)}: {event_types}"
