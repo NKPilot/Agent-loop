@@ -1,61 +1,46 @@
+import { useEffect, useCallback } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useUIStore } from "@/stores/uiStore";
-import type { SSEStatus } from "@/lib/eventTypes";
 import SessionList from "@/components/SessionList";
 import AgentTimeline from "@/components/AgentTimeline";
-
-// ── SSE status indicator ──────────────────────────────────────────────
-
-const SSE_STATUS_CONFIG: Record<
-  SSEStatus,
-  { dotClass: string; label: string; pulse: boolean }
-> = {
-  connected: {
-    dotClass: "bg-green-500",
-    label: "Live",
-    pulse: false,
-  },
-  connecting: {
-    dotClass: "bg-amber-400",
-    label: "Connecting...",
-    pulse: true,
-  },
-  reconnecting: {
-    dotClass: "bg-red-500",
-    label: "Reconnecting...",
-    pulse: true,
-  },
-  failed: {
-    dotClass: "bg-red-600",
-    label: "Connection Failed",
-    pulse: false,
-  },
-};
-
-function ConnectionStatus() {
-  const sseStatus = useUIStore((s) => s.sseStatus);
-  const config = SSE_STATUS_CONFIG[sseStatus];
-
-  return (
-    <div className="flex items-center gap-2">
-      <span className="relative flex h-2.5 w-2.5">
-        {config.pulse && (
-          <span
-            className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${config.dotClass}`}
-          />
-        )}
-        <span
-          className={`relative inline-flex h-2.5 w-2.5 rounded-full ${config.dotClass}`}
-        />
-      </span>
-      <span className="text-sm text-muted-foreground">{config.label}</span>
-    </div>
-  );
-}
+import ConnectionStatus from "@/components/ConnectionStatus";
 
 // ── App ───────────────────────────────────────────────────────────────
 
 function App() {
+  const setActiveSession = useUIStore((s) => s.setActiveSession);
+  const activeSessionId = useUIStore((s) => s.activeSessionId);
+  const clearPendingConfirmation = useUIStore((s) => s.clearPendingConfirmation);
+
+  // ── Keyboard navigation ──────────────────────────────────────────────
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      // Escape: close confirmation dialog (pre-registered for Plan 06)
+      if (e.key === "Escape") {
+        const pending = useUIStore.getState().pendingConfirmation;
+        if (pending) {
+          clearPendingConfirmation();
+        }
+        return;
+      }
+
+      // j / ArrowDown: next session (placeholder — sessions list navigation
+      // is handled within SessionList component via focus management)
+      // k / ArrowUp: previous session
+      // These are registered for future interop with SessionList focus API
+
+      // Enter: open selected session (when focus is on a session item,
+      // handled by SessionItem's onKeyDown)
+    },
+    [clearPendingConfirmation]
+  );
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
   return (
     <TooltipProvider>
       <div className="flex min-h-screen flex-col bg-background text-foreground">
