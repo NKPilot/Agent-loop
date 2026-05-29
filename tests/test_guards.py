@@ -12,6 +12,7 @@ from loopai.state_machine.guards import (
     CostGuard,
     GuardPipeline,
     GuardResult,
+    LoopClassification,
     LoopDetector,
     MessageValidator,
     RateLimitGuard,
@@ -31,7 +32,7 @@ class TestLoopDetector:
     def test_first_tool_call_allowed(self) -> None:
         """第一次工具调用应该被允许。"""
         detector = LoopDetector(window_size=20, warn_threshold=3, block_threshold=5)
-        should_proceed, action = detector.check("get_weather", {"city": "Tokyo"})
+        should_proceed, action, _ = detector.check("get_weather", {"city": "Tokyo"})
 
         assert should_proceed is True
         assert action == "allow"
@@ -42,13 +43,13 @@ class TestLoopDetector:
 
         # 第一次和第二次: allow
         detector.check("get_weather", {"city": "Tokyo"})
-        should_proceed, action = detector.check("get_weather", {"city": "Tokyo"})
+        should_proceed, action, _ = detector.check("get_weather", {"city": "Tokyo"})
 
         assert should_proceed is True
         assert action == "allow"
 
         # 第三次: warn
-        should_proceed, action = detector.check("get_weather", {"city": "Tokyo"})
+        should_proceed, action, _ = detector.check("get_weather", {"city": "Tokyo"})
 
         assert should_proceed is True
         assert action == "warn"
@@ -62,7 +63,7 @@ class TestLoopDetector:
             detector.check("get_weather", {"city": "Tokyo"})
 
         # 第 5 次: block
-        should_proceed, action = detector.check("get_weather", {"city": "Tokyo"})
+        should_proceed, action, _ = detector.check("get_weather", {"city": "Tokyo"})
 
         assert should_proceed is False
         assert action == "block"
@@ -76,13 +77,13 @@ class TestLoopDetector:
         detector.check("get_weather", {"city": "Tokyo"})
 
         # 不同工具: 计数重置
-        should_proceed, action = detector.check("get_time", {"timezone": "UTC"})
+        should_proceed, action, _ = detector.check("get_time", {"timezone": "UTC"})
 
         assert should_proceed is True
         assert action == "allow"
 
         # 再次回到 get_weather — 从 1 重新开始
-        should_proceed, action = detector.check("get_weather", {"city": "Tokyo"})
+        should_proceed, action, _ = detector.check("get_weather", {"city": "Tokyo"})
         assert should_proceed is True
         assert action == "allow"
 
@@ -95,7 +96,7 @@ class TestLoopDetector:
         detector.check("get_weather", {"city": "Tokyo"})
 
         # 不同 city: 签名不同，计数重置
-        should_proceed, action = detector.check("get_weather", {"city": "London"})
+        should_proceed, action, _ = detector.check("get_weather", {"city": "London"})
 
         assert should_proceed is True
         assert action == "allow"
@@ -109,7 +110,7 @@ class TestLoopDetector:
             detector.check("get_weather", {"city": "Tokyo"})
 
         # 第 6 次: 模式持续 -> force_exit
-        should_proceed, action = detector.check("get_weather", {"city": "Tokyo"})
+        should_proceed, action, _ = detector.check("get_weather", {"city": "Tokyo"})
 
         assert should_proceed is False
         assert action == "force_exit"
@@ -126,7 +127,7 @@ class TestLoopDetector:
         detector.reset()
 
         # 重置后第一次调用应为 allow
-        should_proceed, action = detector.check("get_weather", {"city": "Tokyo"})
+        should_proceed, action, _ = detector.check("get_weather", {"city": "Tokyo"})
         assert should_proceed is True
         assert action == "allow"
 
@@ -665,3 +666,109 @@ class TestRateLimitGuard:
         # check 应修剪旧条目，因此不会超过限制
         result = guard.check("get_weather")
         assert result.action == "ok"
+
+
+# =============================================================================
+# LoopDetector 升级测试 — 分类 + 元认知提示
+# =============================================================================
+
+
+class TestLoopDetectorUpgrade:
+    """LoopDetector 升级测试 —— 7 个用例 (三元组 + 分类 + 元认知)。"""
+
+    def test_first_call_classification_none(self) -> None:
+        """第一次调用返回 classification=None。"""
+        detector = LoopDetector(warn_threshold=3, block_threshold=5)
+        should_proceed, action, classification = detector.check(
+            "get_weather", {"city": "Tokyo"}
+        )
+
+        assert should_proceed is True
+        assert action == "allow"
+        assert classification is None
+
+    def test_exact_same_loop_classified(self) -> None:
+        """连续 3 次相同工具+参数返回 LOOP_EXACT_SAME。"""
+        detector = LoopDetector(warn_threshold=3, block_threshold=5)
+
+        # 2 次 — 计数累积但未达到阈值
+        detector.check("get_weather", {"city": "Tokyo"})
+        detector.check("get_weather", {"city": "Tokyo"})
+
+        # 第 3 次 — 达到 warn 阈值
+        should_proceed, action, classification = detector.check(
+            "get_weather", {"city": "Tokyo"}
+        )
+
+        assert should_proceed is True
+        assert action == "warn"
+        assert classification == LoopClassification.LOOP_EXACT_SAME
+
+    def test_same_tool_diff_args_classified(self) -> None:
+        """同一工具不同参数超过阈值返回 LOOP_SAME_TOOL。
+
+        窗口中有 >= warn_threshold 个同工具条目，且签名各不相同，
+        通过 secondary path 检测为 LOOP_SAME_TOOL。
+        """
+        detector = LoopDetector(warn_threshold=3, block_threshold=5)
+
+        # 用不同参数调用同一工具 3 次 — 每次都重置 consecutive_count
+        detector.check("get_weather", {"city": "Tokyo"})
+        detector.check("get_weather", {"city": "London"})
+        _, action, classification = detector.check(
+            "get_weather", {"city": "Paris"}
+        )
+
+        # 窗口有 3 个条目，都是 "get_weather"，secondary path 触发
+        assert action == "allow"  # 不会 warn/block（consecutive_count=1）
+        assert classification == LoopClassification.LOOP_SAME_TOOL
+
+    def test_stuck_classification(self) -> None:
+        """不同工具但频繁切换返回 LOOP_STUCK。
+
+        窗口中有 >= warn_threshold 个不同工具条目，
+        通过 secondary path 检测为 LOOP_STUCK。
+        """
+        detector = LoopDetector(warn_threshold=3, block_threshold=5)
+
+        detector.check("bash.ls", {"path": "/tmp"})
+        detector.check("bash.df", {"args": "-h"})
+        _, action, classification = detector.check(
+            "get_weather", {"city": "Tokyo"}
+        )
+
+        # 窗口有 3 个条目，3 个不同工具 → LOOP_STUCK
+        assert action == "allow"  # 不会 warn/block（consecutive_count=1）
+        assert classification == LoopClassification.LOOP_STUCK
+
+    def test_meta_prompt_exact_same(self) -> None:
+        """get_meta_prompt 对 EXACT_SAME 返回包含工具名的中文提示。"""
+        prompt = LoopDetector.get_meta_prompt(
+            "bash.ls", LoopClassification.LOOP_EXACT_SAME, 5
+        )
+
+        assert "元认知提示" in prompt
+        assert "bash.ls" in prompt
+        assert "5" in prompt
+        assert "完全相同参数" in prompt
+
+    def test_meta_prompt_same_tool(self) -> None:
+        """get_meta_prompt 对 SAME_TOOL 返回提示。"""
+        prompt = LoopDetector.get_meta_prompt(
+            "get_weather", LoopClassification.LOOP_SAME_TOOL, 4
+        )
+
+        assert "元认知提示" in prompt
+        assert "get_weather" in prompt
+        assert "4" in prompt
+        assert "换一个工具" in prompt
+
+    def test_meta_prompt_stuck(self) -> None:
+        """get_meta_prompt 对 STUCK 返回提示。"""
+        prompt = LoopDetector.get_meta_prompt(
+            "unknown", LoopClassification.LOOP_STUCK, 6
+        )
+
+        assert "元认知提示" in prompt
+        assert "卡住" in prompt
+        assert "6" in prompt
