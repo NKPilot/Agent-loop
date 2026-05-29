@@ -76,7 +76,7 @@
   5. 某工具连续失败达到阈值后，熔断器自动暂停该工具；暂停期间 agent 不会收到该工具的调用选项
 **计划**: 3 plans
 **Plans:**
-- [ ] 04-01-PLAN.md — 韧性子系统基础：事件 Schema + CheckpointManager + FailureRegistry + CircuitBreaker
+- [x] 04-01-PLAN.md — 韧性子系统基础：事件 Schema + CheckpointManager + FailureRegistry + CircuitBreaker
 - [ ] 04-02-PLAN.md — 守卫管道（GuardPipeline + CostGuard + RateLimitGuard）+ LoopDetector 升级（分类 + 元认知）
 - [ ] 04-03-PLAN.md — 4 层恢复 + Registry 过滤 + FSM 集成 + main.py 更新
 
