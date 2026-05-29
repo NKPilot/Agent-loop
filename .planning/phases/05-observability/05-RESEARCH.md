@@ -692,27 +692,27 @@ queryClient.setQueryData(['session', id, 'steps'], (old: Step[] | undefined) =>
 | A6 | pnpm is available on the target system for frontend package management. | Environment | LOW — `which pnpm` returned a valid path. CLAUDE.md recommends pnpm. |
 | A7 | The OpenAI API token usage format uses `prompt_tokens` and `completion_tokens` keys (not `input_tokens`/`output_tokens`). | Token Tracking | LOW — OpenAI's API uses `prompt_tokens` and `completion_tokens`. The existing codebase already processes these fields. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Session isolation in EventBus**
    - What we know: EventBus is a singleton per process. All sessions share the same bus. The SSE bridge filters by `session_id`.
    - What's unclear: How to handle concurrent sessions — each needs its own SSE stream but they share the same EventBus.
-   - Recommendation: The SSE bridge filters events by `session_id` (already in every event). Concurrent sessions just get separate SSE endpoints, each filtering independently. No architectural change needed. However, `bus.replay()` returns ALL events — the replay filter must apply `session_id` to avoid leaking cross-session data.
+   - RESOLVED: The SSE bridge filters events by `session_id` (already in every event). Concurrent sessions just get separate SSE endpoints, each filtering independently. No architectural change needed. However, `bus.replay()` returns ALL events — the replay filter must apply `session_id` to avoid leaking cross-session data.
 
 2. **How to wire FastAPI lifespan with existing `run_session()`**
    - What we know: `run_session()` in `main.py` creates all components (EventBus, Session, guards, FSM) and orchestrates the lifecycle. The FastAPI app needs to do the same but expose endpoints.
    - What's unclear: Whether to refactor `run_session()` into reusable factory functions, or duplicate the wiring.
-   - Recommendation: Extract component creation into factory functions (`create_event_bus()`, `create_session()`, `create_fsm()`). `run_session()` becomes a thin wrapper. The FastAPI control endpoint uses the same factories. This minimizes duplication and ensures CLI and Web paths stay in sync.
+   - RESOLVED: Extract component creation into factory functions (`create_event_bus()`, `create_session()`, `create_fsm()`). `run_session()` becomes a thin wrapper. The FastAPI control endpoint uses the same factories. This minimizes duplication and ensures CLI and Web paths stay in sync.
 
 3. **Confirmation flow across SSE boundary**
    - What we know: CLI `CLIAgentRenderer` handles confirmation by pausing Live display, reading `console.input()`, and calling `PermissionGuard.respond()`. The web frontend needs equivalent via SSE + HTTP POST.
    - What's unclear: Whether the `PermissionGuard.respond(confirmation_id, approved)` call is thread-safe / async-safe when called from an HTTP handler.
-   - Recommendation: Read the `PermissionGuard` implementation to verify. Based on existing code, `PermissionGuard` uses `asyncio.Event` internally — fully async-safe. The HTTP POST handler can directly call `permission_guard.respond()`.
+   - RESOLVED: Read the `PermissionGuard` implementation to verify. Based on existing code, `PermissionGuard` uses `asyncio.Event` internally — fully async-safe. The HTTP POST handler can directly call `permission_guard.respond()`.
 
 4. **Session history data format for the frontend**
    - What we know: JSONL files contain raw events with `seq`, `ts`, `session_id` wrapper. The frontend needs a structured session summary.
    - What's unclear: Exact response format for `/api/sessions` and `/api/sessions/{id}`.
-   - Recommendation: `/api/sessions` returns a lightweight list (id, created_at, step_count, status, exit_reason). `/api/sessions/{id}` returns the full event array. The frontend reconstructs the timeline client-side from the event array — same as it does for live SSE events.
+   - RESOLVED: `/api/sessions` returns a lightweight list (id, created_at, step_count, status, exit_reason). `/api/sessions/{id}` returns the full event array. The frontend reconstructs the timeline client-side from the event array — same as it does for live SSE events.
 
 ## Environment Availability
 
