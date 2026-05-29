@@ -19,6 +19,7 @@ export function useSessionEvents(sessionId: string | null): { status: SSEStatus 
   const queryClient = useQueryClient();
   const appendEvent = useEventStore((s) => s.appendEvent);
   const setSSEStatus = useUIStore((s) => s.setSSEStatus);
+  const setSSERetryCount = useUIStore((s) => s.setSSERetryCount);
 
   const onEvent = useCallback(
     (eventType: string, data: Event) => {
@@ -42,12 +43,17 @@ export function useSessionEvents(sessionId: string | null): { status: SSEStatus 
 
   const url = sessionId ? `/api/sessions/${encodeURIComponent(sessionId)}/stream` : null;
 
-  const { status } = useSSE(url, onEvent);
+  const { status, retryCount } = useSSE(url, onEvent);
 
   // Sync SSE status to UI store via effect (avoids render-phase store writes)
   useEffect(() => {
     setSSEStatus(status);
   }, [status, setSSEStatus]);
+
+  // Sync retry count to UI store
+  useEffect(() => {
+    setSSERetryCount(retryCount);
+  }, [retryCount, setSSERetryCount]);
 
   return { status };
 }
