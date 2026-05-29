@@ -1,6 +1,7 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useUIStore } from "@/stores/uiStore";
 import type { SSEStatus } from "@/lib/eventTypes";
+import SessionList from "@/components/SessionList";
 
 // ── SSE status indicator ──────────────────────────────────────────────
 
@@ -72,15 +73,7 @@ function App() {
             <div className="border-b border-border px-4 py-3">
               <h2 className="text-[20px] font-semibold leading-tight">Session List</h2>
             </div>
-            <div className="flex flex-1 items-center justify-center p-6">
-              <div className="text-center space-y-2">
-                <p className="text-sm font-medium text-foreground">No Agent Sessions Yet</p>
-                <p className="text-xs text-muted-foreground">
-                  Start your first agent session to see real-time reasoning steps,
-                  tool calls, and token usage right here.
-                </p>
-              </div>
-            </div>
+            <SessionList />
           </aside>
 
           {/* Center panel: Agent Timeline — flex-1 */}
