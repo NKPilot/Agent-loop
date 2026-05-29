@@ -2,6 +2,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useUIStore } from "@/stores/uiStore";
 import type { SSEStatus } from "@/lib/eventTypes";
 import SessionList from "@/components/SessionList";
+import AgentTimeline from "@/components/AgentTimeline";
 
 // ── SSE status indicator ──────────────────────────────────────────────
 
@@ -81,13 +82,7 @@ function App() {
             <div className="border-b border-border px-4 py-3">
               <h2 className="text-[20px] font-semibold leading-tight">Agent Timeline</h2>
             </div>
-            <div className="flex flex-1 items-center justify-center p-6">
-              <div className="text-center space-y-2">
-                <p className="text-sm text-muted-foreground">
-                  Select a session to view the agent timeline.
-                </p>
-              </div>
-            </div>
+            <AgentTimeline />
           </section>
 
           {/* Right panel: Tool Detail — 360px */}
