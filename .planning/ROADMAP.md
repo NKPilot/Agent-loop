@@ -94,7 +94,7 @@
 - [x] 05-01-PLAN.md -- FastAPI Backend + SSE Bridge：应用工厂、CORS、SSE 桥接消费者、流端点、测试脚手架
 - [x] 05-02-PLAN.md -- Session REST + Agent Control API：会话 CRUD、启动/确认端点、组件工厂提取、集成测试
 - [x] 05-03-PLAN.md -- Frontend Scaffold：Vite 项目 + 依赖安装 + shadcn/ui 初始化
-- [ ] 05-04-PLAN.md -- Frontend Layout + Data Pipeline：三面板布局、TypeScript 事件类型、useSSE hook、Zustand stores
+- [x] 05-04-PLAN.md -- Frontend Layout + Data Pipeline：三面板布局、TypeScript 事件类型、useSSE hook、Zustand stores
 - [ ] 05-05-PLAN.md -- Agent Timeline + Session List：SessionList 组件、AgentTimeline+StepCard、ConnectionStatus、键盘导航
 - [ ] 05-06-PLAN.md -- Tool Detail + Token/Cost + Confirmation：ToolDetail、TokenUsageCard+recharts、ConfirmationDialog（D-06）
 - [ ] 05-07-PLAN.md -- End-to-End Integration + Production：Start Agent 串联、StaticFiles 生产模式、BIZ-02 端到端验证
