@@ -1,4 +1,57 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useUIStore } from "@/stores/uiStore";
+import type { SSEStatus } from "@/lib/eventTypes";
+
+// ── SSE status indicator ──────────────────────────────────────────────
+
+const SSE_STATUS_CONFIG: Record<
+  SSEStatus,
+  { dotClass: string; label: string; pulse: boolean }
+> = {
+  connected: {
+    dotClass: "bg-green-500",
+    label: "Live",
+    pulse: false,
+  },
+  connecting: {
+    dotClass: "bg-amber-400",
+    label: "Connecting...",
+    pulse: true,
+  },
+  reconnecting: {
+    dotClass: "bg-red-500",
+    label: "Reconnecting...",
+    pulse: true,
+  },
+  failed: {
+    dotClass: "bg-red-600",
+    label: "Connection Failed",
+    pulse: false,
+  },
+};
+
+function ConnectionStatus() {
+  const sseStatus = useUIStore((s) => s.sseStatus);
+  const config = SSE_STATUS_CONFIG[sseStatus];
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="relative flex h-2.5 w-2.5">
+        {config.pulse && (
+          <span
+            className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${config.dotClass}`}
+          />
+        )}
+        <span
+          className={`relative inline-flex h-2.5 w-2.5 rounded-full ${config.dotClass}`}
+        />
+      </span>
+      <span className="text-sm text-muted-foreground">{config.label}</span>
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────
 
 function App() {
   return (
@@ -9,14 +62,7 @@ function App() {
           <h1 className="text-[28px] font-semibold leading-tight tracking-tight">
             loopAI -- Observability Dashboard
           </h1>
-          {/* SSE connection status indicator placeholder */}
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
-            </span>
-            <span className="text-sm text-muted-foreground">Connecting...</span>
-          </div>
+          <ConnectionStatus />
         </header>
 
         {/* Three-panel body */}
