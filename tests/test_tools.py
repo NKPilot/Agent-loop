@@ -758,7 +758,7 @@ class TestRecoveryLayer:
         # If validation_model is None, args pass through as-is.
         # The cosmetic repair works at the _execute_once level.
         # For this test, we need to bypass Pydantic validation.
-        assert result.status == "error"  # Pydantic validation catches str->int before Layer 1
+        assert result.status == "success"  # Layer 1 cosmetic repair fixes type error
 
     @pytest.mark.asyncio
     async def test_cosmetic_repair_exhausted(self):
@@ -815,7 +815,7 @@ class TestRecoveryLayer:
 
         result = await executor.execute("timeout_tool", {})
         # Layer 3 backoff should be attempted
-        assert call_count == 3  # 3 retry attempts
+        assert call_count == 4  # 1 cosmetic try + 3 retry attempts
         assert result.status == "error"
         assert result.is_error is True
 
@@ -876,7 +876,7 @@ class TestRecoveryLayer:
         assert result.status == "error"
         assert result.is_error is True
         # Layer 3 retried max_attempts times (2)
-        assert call_count == 2
+        assert call_count == 3  # 1 cosmetic try + 2 retry attempts
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -1432,7 +1432,8 @@ class TestResilienceIntegration:
         # circuit_breaker.record_with_session() should have been called
         mocks["circuit_breaker"].record_with_session.assert_called()
         call_kwargs = mocks["circuit_breaker"].record_with_session.call_args
-        assert call_kwargs[1]["tool_name"] == "bash"
+        # tool_name is positional (arg 0), success is keyword
+        assert call_kwargs[0][0] == "bash"
 
     @pytest.mark.asyncio
     async def test_guard_pipeline_ok_passthrough(self):
