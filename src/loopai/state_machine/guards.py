@@ -36,6 +36,19 @@ class ValidationError(ValueError):
         self.tool_call_id = tool_call_id
 
 
+class LoopClassification(StrEnum):
+    """Classification of detected loop patterns for metacognitive prompting (RES-02).
+
+    LOOP_EXACT_SAME: Same tool called with the same arguments repeatedly.
+    LOOP_SAME_TOOL: Same tool called repeatedly but with different arguments.
+    LOOP_STUCK: Different tools called but no meaningful progress (heuristic).
+    """
+
+    LOOP_EXACT_SAME = "exact_same"
+    LOOP_SAME_TOOL = "same_tool"
+    LOOP_STUCK = "stuck"
+
+
 class LoopDetector:
     """检测重复工具调用的循环检测器。
 
@@ -82,7 +95,9 @@ class LoopDetector:
         raw = f"{tool_name}:{args_json}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
-    def check(self, tool_name: str, arguments: dict) -> tuple[bool, str]:
+    def check(
+        self, tool_name: str, arguments: dict
+    ) -> tuple[bool, str, LoopClassification | None]:
         """检查此工具调用是否构成循环。
 
         Args:
@@ -90,9 +105,8 @@ class LoopDetector:
             arguments: 工具参数字典。
 
         Returns:
-            (should_proceed, action) 元组。
-            should_proceed 为 True 时允许调用继续，False 时拒绝。
-            action 为 "allow"、"warn"、"block" 或 "force_exit" 之一。
+            (should_proceed, action, classification) 三元组。
+            classification 为 None 表示无循环，否则为循环分类类型。
         """
         sig = self._signature(tool_name, arguments)
 
@@ -104,13 +118,83 @@ class LoopDetector:
 
         self._window.append((tool_name, sig))
 
+        # Determine classification based on window analysis (always run)
+        classification: LoopClassification | None = None
+        recent = list(self._window)[-min(5, len(self._window)):]
+
+        if recent and self._consecutive_count >= self._warn_threshold:
+            # Primary path: consecutive same-signature calls trigger classification
+            if all(t == tool_name and s == sig for t, s in recent):
+                classification = LoopClassification.LOOP_EXACT_SAME
+            elif all(t == tool_name for t, _ in recent):
+                classification = LoopClassification.LOOP_SAME_TOOL
+            else:
+                classification = LoopClassification.LOOP_STUCK
+        elif recent and len(recent) >= self._warn_threshold:
+            # Secondary path: window has enough entries but different signatures
+            # Analyze pattern without consecutive same-signature requirement
+            tools = {t for t, _ in recent}
+            if len(tools) == 1:
+                # All entries are the same tool (but different args)
+                classification = LoopClassification.LOOP_SAME_TOOL
+            elif len(tools) >= self._warn_threshold:
+                # All different tools — stuck pattern
+                classification = LoopClassification.LOOP_STUCK
+
         if self._consecutive_count > self._block_threshold:
-            return (False, "force_exit")
+            return (False, "force_exit", classification)
         elif self._consecutive_count >= self._block_threshold:
-            return (False, "block")
+            return (False, "block", classification)
         elif self._consecutive_count >= self._warn_threshold:
-            return (True, "warn")
-        return (True, "allow")
+            return (True, "warn", classification)
+        return (True, "allow", classification)
+
+    @staticmethod
+    def get_meta_prompt(
+        tool_name: str,
+        classification: LoopClassification | None,
+        consecutive_count: int,
+    ) -> str:
+        """Generate a metacognitive prompt explaining why the loop was detected.
+
+        Args:
+            tool_name: The tool being called.
+            classification: The loop classification type.
+            consecutive_count: Number of consecutive identical calls.
+
+        Returns:
+            A Chinese metacognitive prompt string to inject as system message.
+        """
+        if classification == LoopClassification.LOOP_EXACT_SAME:
+            return (
+                f"[元认知提示] 你已经连续 {consecutive_count} 次使用完全相同参数调用 "
+                f"'{tool_name}'，每次都得到相同结果。继续重复不会改变结果。"
+                f"请尝试以下策略之一：\n"
+                f"1. 换个思路，使用不同的工具或参数\n"
+                f"2. 检查已有信息是否能直接回答问题\n"
+                f"3. 如果无法完成，直接告知用户并解释原因"
+            )
+        elif classification == LoopClassification.LOOP_SAME_TOOL:
+            return (
+                f"[元认知提示] 你反复使用 '{tool_name}' 工具（{consecutive_count} 次），"
+                f"虽然参数不同但未取得实质进展。请考虑：\n"
+                f"1. 是否需要换一个工具？\n"
+                f"2. 已有信息是否足够回答用户？\n"
+                f"3. 尝试不同的方法解决问题"
+            )
+        elif classification == LoopClassification.LOOP_STUCK:
+            return (
+                f"[元认知提示] 检测到你可能在执行中卡住了 — "
+                f"最近 {consecutive_count} 步你尝试了不同的工具但没有取得进展。"
+                f"请暂停并重新评估：\n"
+                f"1. 当前目标是什么？\n"
+                f"2. 哪些操作真正有助于达成目标？\n"
+                f"3. 是否需要向用户请求更多信息？"
+            )
+        return (
+            f"[元认知提示] 检测到重复调用模式（{consecutive_count} 次）。"
+            f"请尝试不同的方法或直接给出你的结论。"
+        )
 
     def reset(self) -> None:
         """重置检测器状态。
