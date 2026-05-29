@@ -216,6 +216,57 @@ class TokenWarning(EventBase):
     action: str
 
 
+# ── Resilience events (Phase 4) ──────────────────────────────────────
+
+
+class CheckpointSaved(EventBase):
+    """Published after session state is persisted to checkpoint file."""
+
+    event_type: Literal["checkpoint_saved"] = "checkpoint_saved"
+    step_count: int
+    state: str  # AgentState.value, e.g. "reason", "act"
+    file_path: str  # checkpoint file path
+
+
+class CircuitOpened(EventBase):
+    """Published when circuit breaker opens for a tool."""
+
+    event_type: Literal["circuit_opened"] = "circuit_opened"
+    tool_name: str
+    failure_rate: float  # failure rate (0.0-1.0) that triggered opening
+    window_size: int
+    previous_state: str  # state before transition
+    new_state: str  # "open"
+
+
+class CircuitClosed(EventBase):
+    """Published when circuit breaker closes for a tool."""
+
+    event_type: Literal["circuit_closed"] = "circuit_closed"
+    tool_name: str
+    previous_state: str
+    new_state: str  # "closed"
+
+
+class FailureRegistered(EventBase):
+    """Published when a tool failure is recorded in FailureRegistry."""
+
+    event_type: Literal["failure_registered"] = "failure_registered"
+    tool_name: str
+    signature: str  # deterministic hash (same format as LoopDetector._signature)
+    error_message: str
+
+
+class EscalationRequired(EventBase):
+    """Published when 4-layer recovery reaches human escalation (Layer 4)."""
+
+    event_type: Literal["escalation_required"] = "escalation_required"
+    tool_name: str
+    layer: int  # recovery layer reached
+    attempt_count: int
+    error_message: str
+
+
 # ── Discriminated union type ────────────────────────────────────────
 
 Event = Annotated[
@@ -235,6 +286,11 @@ Event = Annotated[
     | ConfirmationRequired
     | ConfirmationResponse
     | ContextCompacted
-    | TokenWarning,
+    | TokenWarning
+    | CheckpointSaved
+    | CircuitOpened
+    | CircuitClosed
+    | FailureRegistered
+    | EscalationRequired,
     Field(discriminator="event_type"),
 ]
