@@ -15,9 +15,12 @@ from loopai.events.bus import EventBus
 from loopai.session.context import AgentState, Session
 from loopai.state_machine.guards import (
     BudgetGuard,
+    GuardResult,
+    GuardPipeline,
     LoopDetector,
     MessageValidator,
     PermissionGuard,
+    RateLimitGuard,
     ValidationError,
 )
 from loopai.tools.types import ToolMetadata, ToolResult, PermissionLevel
@@ -437,7 +440,7 @@ async def test_unreachable_detection_too_many_failures():
     budget_guard = BudgetGuard(max_steps=15)
     # LoopDetector that always blocks (returns False for should_proceed)
     loop_detector = MagicMock()
-    loop_detector.check = MagicMock(return_value=(False, "block"))
+    loop_detector.check = MagicMock(return_value=(False, "block", None))
 
     message_validator = MessageValidator()
 
@@ -1267,3 +1270,266 @@ class TestContextManagement:
         assert overflow_events[0]["file_path"] == ".sandbox/overflow/test.txt"
         assert overflow_events[0]["tool_name"] == "bash"
         assert overflow_events[0]["size_kb"] > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 4: Resilience Integration Tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestResilienceIntegration:
+    """Integration tests verifying Phase 4 components are wired correctly."""
+
+    # ── Helper ──────────────────────────────────────────────────────────
+
+    def _make_resilience_fsm(self, client, bus, budget_guard, loop_detector,
+                              message_validator, **kwargs):
+        """Helper: create ReActFSM with Phase 4 component mocks."""
+        from loopai.state_machine.fsm import ReActFSM
+
+        registry = MagicMock()
+        executor = MagicMock()
+        executor.execute = AsyncMock(
+            return_value=ToolResult.success(data="output", duration_ms=10.0)
+        )
+        permission_guard = MagicMock()
+        permission_guard.check = AsyncMock(return_value=(True, "allow"))
+
+        meta = ToolMetadata(
+            name="bash", description="Execute bash",
+            permission_level=PermissionLevel.SAFE, timeout=60.0,
+        )
+        registry.get.return_value = meta
+        registry.get_schemas.return_value = [meta.to_openai_schema()]
+
+        checkpoint_manager = MagicMock()
+        checkpoint_manager.save = MagicMock(return_value={"state": "finished"})
+
+        circuit_breaker = MagicMock()
+        circuit_breaker.check = MagicMock(return_value=(True, "closed"))
+        circuit_breaker.record_with_session = AsyncMock()
+        circuit_breaker.get_open_tools = MagicMock(return_value=set())
+
+        failure_registry = MagicMock()
+        failure_registry.should_skip = MagicMock(return_value=False)
+        failure_registry.record = MagicMock()
+
+        guard_pipeline = MagicMock()
+        guard_pipeline.check = MagicMock(
+            return_value=GuardResult(action="ok")
+        )
+
+        rate_limit_guard = MagicMock()
+        rate_limit_guard.record_call = MagicMock()
+
+        fsm = ReActFSM(
+            client, bus, budget_guard, loop_detector, message_validator,
+            registry, executor, permission_guard,
+            **{**kwargs,
+               "checkpoint_manager": checkpoint_manager,
+               "circuit_breaker": circuit_breaker,
+               "failure_registry": failure_registry,
+               "guard_pipeline": guard_pipeline,
+               "rate_limit_guard": rate_limit_guard,
+            },
+        )
+        return fsm, {
+            "checkpoint_manager": checkpoint_manager,
+            "circuit_breaker": circuit_breaker,
+            "failure_registry": failure_registry,
+            "guard_pipeline": guard_pipeline,
+            "rate_limit_guard": rate_limit_guard,
+        }
+
+    # ── Tests ────────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_saved_event(self):
+        """FSM calls checkpoint_manager.save() during the run loop."""
+        bus = EventBus()
+        session = Session()
+
+        client = MagicMock()
+        client.complete = AsyncMock(
+            return_value=make_response(content="Final answer.")
+        )
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        fsm, mocks = self._make_resilience_fsm(
+            client, bus, budget_guard, loop_detector, message_validator,
+        )
+
+        result = await fsm.run(session)
+
+        # checkpoint_manager.save() should have been called at least once
+        mocks["checkpoint_manager"].save.assert_called()
+        assert result.state == AgentState.FINISH
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_check_called(self):
+        """FSM calls CircuitBreaker.check() during tool execution."""
+        bus = EventBus()
+        session = Session()
+
+        client = MagicMock()
+        client.complete = AsyncMock(
+            side_effect=[
+                make_response(
+                    content=None,
+                    tool_calls=[make_tool_call("bash", {"cmd": "ls"}, "call_1")],
+                ),
+                make_response(content="Done."),
+            ]
+        )
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        fsm, mocks = self._make_resilience_fsm(
+            client, bus, budget_guard, loop_detector, message_validator,
+        )
+
+        result = await fsm.run(session)
+
+        # circuit_breaker.check() should have been called with "bash"
+        mocks["circuit_breaker"].check.assert_called()
+        call_args = mocks["circuit_breaker"].check.call_args
+        assert call_args[0][0] == "bash"
+
+        assert result.state == AgentState.FINISH
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_record_called(self):
+        """FSM calls CircuitBreaker.record_with_session() after tool execution."""
+        bus = EventBus()
+        session = Session()
+
+        client = MagicMock()
+        client.complete = AsyncMock(
+            side_effect=[
+                make_response(
+                    content=None,
+                    tool_calls=[make_tool_call("bash", {"cmd": "ls"}, "call_1")],
+                ),
+                make_response(content="Done."),
+            ]
+        )
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        fsm, mocks = self._make_resilience_fsm(
+            client, bus, budget_guard, loop_detector, message_validator,
+        )
+
+        await fsm.run(session)
+
+        # circuit_breaker.record_with_session() should have been called
+        mocks["circuit_breaker"].record_with_session.assert_called()
+        call_kwargs = mocks["circuit_breaker"].record_with_session.call_args
+        assert call_kwargs[1]["tool_name"] == "bash"
+
+    @pytest.mark.asyncio
+    async def test_guard_pipeline_ok_passthrough(self):
+        """GuardPipeline returns ok — LLM is called normally."""
+        bus = EventBus()
+        session = Session()
+
+        client = MagicMock()
+        client.complete = AsyncMock(
+            return_value=make_response(content="Final answer.")
+        )
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        fsm, mocks = self._make_resilience_fsm(
+            client, bus, budget_guard, loop_detector, message_validator,
+        )
+        # guard_pipeline already returns action="ok" by default
+
+        result = await fsm.run(session)
+
+        # LLM should have been called (guard didn't block)
+        client.complete.assert_called()
+        assert result.state == AgentState.FINISH
+
+    @pytest.mark.asyncio
+    async def test_failure_registry_records_on_error(self):
+        """Tool failure triggers FailureRegistry.record()."""
+        bus = EventBus()
+        session = Session()
+
+        client = MagicMock()
+        client.complete = AsyncMock(
+            side_effect=[
+                make_response(
+                    content=None,
+                    tool_calls=[make_tool_call("bash", {"cmd": "bad-cmd"}, "call_1")],
+                ),
+                make_response(content="Let me try another approach."),
+            ]
+        )
+
+        budget_guard = BudgetGuard(max_steps=15)
+        loop_detector = LoopDetector()
+        message_validator = MessageValidator()
+
+        from loopai.state_machine.fsm import ReActFSM
+
+        registry = MagicMock()
+        executor = MagicMock()
+        executor.execute = AsyncMock(
+            return_value=ToolResult.error(error_msg="Command failed", duration_ms=5.0)
+        )
+        permission_guard = MagicMock()
+        permission_guard.check = AsyncMock(return_value=(True, "allow"))
+
+        meta = ToolMetadata(
+            name="bash", description="Execute bash",
+            permission_level=PermissionLevel.SAFE, timeout=60.0,
+        )
+        registry.get.return_value = meta
+        registry.get_schemas.return_value = [meta.to_openai_schema()]
+
+        checkpoint_manager = MagicMock()
+        checkpoint_manager.save = MagicMock(return_value={"state": "finished"})
+
+        circuit_breaker = MagicMock()
+        circuit_breaker.check = MagicMock(return_value=(True, "closed"))
+        circuit_breaker.record_with_session = AsyncMock()
+        circuit_breaker.get_open_tools = MagicMock(return_value=set())
+
+        failure_registry = MagicMock()
+        failure_registry.should_skip = MagicMock(return_value=False)
+        failure_registry.record = MagicMock()
+
+        guard_pipeline = MagicMock()
+        guard_pipeline.check = MagicMock(return_value=GuardResult(action="ok"))
+
+        rate_limit_guard = MagicMock()
+        rate_limit_guard.record_call = MagicMock()
+
+        fsm = ReActFSM(
+            client, bus, budget_guard, loop_detector, message_validator,
+            registry, executor, permission_guard,
+            checkpoint_manager=checkpoint_manager,
+            circuit_breaker=circuit_breaker,
+            failure_registry=failure_registry,
+            guard_pipeline=guard_pipeline,
+            rate_limit_guard=rate_limit_guard,
+        )
+
+        await fsm.run(session)
+
+        # failure_registry.record() should have been called
+        failure_registry.record.assert_called()
+        # Verify the tool_name was passed
+        call_args = failure_registry.record.call_args
+        assert call_args[0][0] == "bash"

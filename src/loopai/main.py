@@ -19,13 +19,19 @@ from loopai.context.compressor import ContextCompressor
 from loopai.context.token_counter import TokenCounter
 from loopai.events.bus import EventBus
 from loopai.llm.client import LLMClient
+from loopai.resilience.checkpoint import CheckpointManager
+from loopai.resilience.circuit_breaker import CircuitBreaker
+from loopai.resilience.failure_registry import FailureRegistry
 from loopai.session.context import Session
 from loopai.state_machine.fsm import ReActFSM
 from loopai.state_machine.guards import (
     BudgetGuard,
+    CostGuard,
+    GuardPipeline,
     LoopDetector,
     MessageValidator,
     PermissionGuard,
+    RateLimitGuard,
     TokenGuard,
 )
 from loopai.tools.bash import create_bash_tool
@@ -102,11 +108,26 @@ async def run_session(
     token_guard = TokenGuard(token_counter, window_size=config.context_window)
     compressor = ContextCompressor(token_counter, window_size=config.context_window)
 
+    # ── Wire up resilience components (Phase 4) ──────────────────────────
+    checkpoint_manager = CheckpointManager(session.session_id)
+    circuit_breaker = CircuitBreaker()
+    failure_registry = FailureRegistry(session.session_id)
+    rate_limit_guard = RateLimitGuard()
+    cost_guard = CostGuard()
+    # GuardPipeline: token_guard and cost_guard check messages,
+    # rate_limit_guard is used directly in _handle_act via record_call()
+    guard_pipeline = GuardPipeline([token_guard, cost_guard])
+
     fsm = ReActFSM(
         client, bus, budget_guard, loop_detector, message_validator,
         registry, executor, permission_guard,
         token_guard=token_guard,
         compressor=compressor,
+        guard_pipeline=guard_pipeline,
+        checkpoint_manager=checkpoint_manager,
+        circuit_breaker=circuit_breaker,
+        failure_registry=failure_registry,
+        rate_limit_guard=rate_limit_guard,
     )
 
     # ── Start consumers ──────────────────────────────────────────────
@@ -137,6 +158,10 @@ async def run_session(
 
         # 3. Flush and close the logger
         await logger.stop()
+
+        # 4. Cleanup Phase 4 resources
+        await checkpoint_manager.close()
+        await failure_registry.close()
 
     return session
 
