@@ -42,6 +42,115 @@ if TYPE_CHECKING:
     from loopai.config import AgentConfig
 
 
+def create_agent_components(
+    config: AgentConfig,
+    prompt: str,
+    bus: EventBus,
+    max_steps_override: int | None = None,
+) -> dict:
+    """Create all agent components without starting consumers.
+
+    Extracts the component creation logic from run_session() so it can
+    be shared between CLI and Web paths. The Web path uses its own
+    consumer set (SSE bridge instead of CLI renderer).
+
+    Decision reference: RESEARCH.md Q2 — extract component creation into
+    reusable factory functions for CLI/Web consistency.
+
+    Args:
+        config: AgentConfig with API key, model, and defaults.
+        prompt: The user's question or instruction.
+        bus: An existing EventBus instance (may be shared across sessions).
+        max_steps_override: If provided, overrides config.max_steps for BudgetGuard.
+
+    Returns:
+        A dict containing:
+        - session: Session with initial system + user messages
+        - fsm: ReActFSM wired with all guards and tools
+        - logger: JSONLLogger (not started)
+        - permission_guard: PermissionGuard for confirmation flow
+        - registry: ToolRegistry with bash tool registered
+        - executor: ToolExecutor wired to registry
+        - checkpoint_manager: CheckpointManager for recovery
+        - failure_registry: FailureRegistry for error tracking
+        - bus: The EventBus instance passed in
+    """
+    actual_max = max_steps_override if max_steps_override is not None else config.max_steps
+
+    # ── Create session with initial messages ──────────────────────────
+    session = Session(config=config)
+
+    session.add_message(
+        "system",
+        content=(
+            "You are a helpful AI assistant with access to a Bash tool. "
+            "Use the 'bash' tool to execute shell commands when needed. "
+            "The bash tool supports common commands like ls, df, du, find, "
+            "cat, head, tail, grep, sort, echo, and stat. "
+            "Dangerous commands (rm, dd, mkfs) require user confirmation. "
+            "Always explain what you're doing before running commands."
+        ),
+    )
+    session.add_message("user", content=prompt)
+
+    # ── Wire up agent components ──────────────────────────────────────
+    client = LLMClient(config, bus)
+    budget_guard = BudgetGuard(max_steps=actual_max)
+    loop_detector = LoopDetector()
+    message_validator = MessageValidator()
+
+    # ── Wire up tool system (Phase 2) ──────────────────────────────────
+    registry = ToolRegistry()
+    executor = ToolExecutor(registry)
+    permission_guard = PermissionGuard(
+        bus, confirmation_timeout=config.confirmation_timeout
+    )
+
+    # Register Bash tool
+    bash_fn = create_bash_tool(working_dir=config.tool_working_dir)
+    registry.register(bash_fn)
+
+    # ── Wire up context management (Phase 3) ──────────────────────────
+    token_counter = TokenCounter()
+    token_guard = TokenGuard(token_counter, window_size=config.context_window)
+    compressor = ContextCompressor(token_counter, window_size=config.context_window)
+
+    # ── Wire up resilience components (Phase 4) ──────────────────────────
+    checkpoint_manager = CheckpointManager(session.session_id)
+    circuit_breaker = CircuitBreaker()
+    failure_registry = FailureRegistry(session.session_id)
+    rate_limit_guard = RateLimitGuard()
+    cost_guard = CostGuard()
+    guard_pipeline = GuardPipeline([token_guard, cost_guard])
+
+    fsm = ReActFSM(
+        client, bus, budget_guard, loop_detector, message_validator,
+        registry, executor, permission_guard,
+        token_guard=token_guard,
+        compressor=compressor,
+        guard_pipeline=guard_pipeline,
+        checkpoint_manager=checkpoint_manager,
+        circuit_breaker=circuit_breaker,
+        failure_registry=failure_registry,
+        rate_limit_guard=rate_limit_guard,
+    )
+
+    # ── Create logger (not started — caller decides when to start) ────
+    logger = JSONLLogger(session.session_id)
+
+    return {
+        "session": session,
+        "fsm": fsm,
+        "logger": logger,
+        "permission_guard": permission_guard,
+        "registry": registry,
+        "executor": executor,
+        "checkpoint_manager": checkpoint_manager,
+        "failure_registry": failure_registry,
+        "bus": bus,
+    }
+
+
 async def run_session(
     prompt: str,
     config: AgentConfig,
@@ -68,70 +177,17 @@ async def run_session(
     """
     actual_max = max_steps_override if max_steps_override is not None else config.max_steps
 
-    # ── Create core components ──────────────────────────────────────
+    # ── Create core components via shared factory ────────────────────
     bus = EventBus()
-    session = Session(config=config)
-
-    # Populate initial conversation
-    session.add_message(
-        "system",
-        content=(
-            "You are a helpful AI assistant with access to a Bash tool. "
-            "Use the 'bash' tool to execute shell commands when needed. "
-            "The bash tool supports common commands like ls, df, du, find, "
-            "cat, head, tail, grep, sort, echo, and stat. "
-            "Dangerous commands (rm, dd, mkfs) require user confirmation. "
-            "Always explain what you're doing before running commands."
-        ),
-    )
-    session.add_message("user", content=prompt)
-
-    # Wire up agent components
-    client = LLMClient(config, bus)
-    budget_guard = BudgetGuard(max_steps=actual_max)
-    loop_detector = LoopDetector()
-    message_validator = MessageValidator()
-
-    # ── Wire up tool system (Phase 2) ──────────────────────────────
-    registry = ToolRegistry()
-    executor = ToolExecutor(registry)
-    permission_guard = PermissionGuard(
-        bus, confirmation_timeout=config.confirmation_timeout
-    )
-
-    # Register Bash tool
-    bash_fn = create_bash_tool(working_dir=config.tool_working_dir)
-    registry.register(bash_fn)
-
-    # ── Wire up context management (Phase 3) ──────────────────────────
-    token_counter = TokenCounter()
-    token_guard = TokenGuard(token_counter, window_size=config.context_window)
-    compressor = ContextCompressor(token_counter, window_size=config.context_window)
-
-    # ── Wire up resilience components (Phase 4) ──────────────────────────
-    checkpoint_manager = CheckpointManager(session.session_id)
-    circuit_breaker = CircuitBreaker()
-    failure_registry = FailureRegistry(session.session_id)
-    rate_limit_guard = RateLimitGuard()
-    cost_guard = CostGuard()
-    # GuardPipeline: token_guard and cost_guard check messages,
-    # rate_limit_guard is used directly in _handle_act via record_call()
-    guard_pipeline = GuardPipeline([token_guard, cost_guard])
-
-    fsm = ReActFSM(
-        client, bus, budget_guard, loop_detector, message_validator,
-        registry, executor, permission_guard,
-        token_guard=token_guard,
-        compressor=compressor,
-        guard_pipeline=guard_pipeline,
-        checkpoint_manager=checkpoint_manager,
-        circuit_breaker=circuit_breaker,
-        failure_registry=failure_registry,
-        rate_limit_guard=rate_limit_guard,
-    )
+    components = create_agent_components(config, prompt, bus, max_steps_override)
+    session = components["session"]
+    fsm = components["fsm"]
+    logger = components["logger"]
+    permission_guard = components["permission_guard"]
+    checkpoint_manager = components["checkpoint_manager"]
+    failure_registry = components["failure_registry"]
 
     # ── Start consumers ──────────────────────────────────────────────
-    logger = JSONLLogger(session.session_id)
     renderer = CLIAgentRenderer(bus, permission_guard=permission_guard)
 
     logger_task = await logger.start(bus)
