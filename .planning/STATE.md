@@ -6,10 +6,10 @@ status: milestone_complete
 last_updated: "2026-05-30T01:10:23.001Z"
 progress:
   total_phases: 5
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 22
   completed_plans: 21
-  percent: 100
+  percent: 120
 ---
 
 # 项目状态
