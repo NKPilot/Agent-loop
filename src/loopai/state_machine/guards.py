@@ -419,6 +419,8 @@ class PermissionGuard:
         permission_level: PermissionLevelType,
         session_id: str,
         step_num: int,
+        *,
+        tool_call_id: str = "",
     ) -> tuple[bool, str]:
         """Check whether this tool call should proceed.
 
@@ -443,7 +445,10 @@ class PermissionGuard:
             return (True, "allow")
 
         # DANGEROUS — require user confirmation.
+        # Include tool_call_id so each tool call gets a unique confirmation
         confirmation_id = f"{session_id}_{tool_name}_{step_num}"
+        if tool_call_id:
+            confirmation_id += f"_{tool_call_id}"
 
         # Publish confirmation_required event for CLI/frontend consumers.
         await self._bus.publish(

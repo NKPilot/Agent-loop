@@ -451,6 +451,7 @@ class ReActFSM:
                 metadata.permission_level,
                 session.session_id,
                 step_num,
+                tool_call_id=tool_call_id,
             )
 
             if not perm_result:
