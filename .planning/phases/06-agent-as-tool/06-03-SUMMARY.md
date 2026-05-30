@@ -108,6 +108,18 @@ None - no new network endpoints, auth paths, or security-relevant surface introd
 - 等待后端 Agent-as-Tool 事件发布后即可在 Dashboard 展示多 Agent 调用链
 - StepCard 集成检测逻辑自动生效，无需额外前端配置
 
+## Self-Check: PASSED
+
+- eventTypes.ts: FOUND
+- AgentCallCard.tsx: FOUND
+- StepCard.tsx: FOUND
+- SUMMARY.md: FOUND
+- Commit 8761bdf: FOUND (feat: 添加事件类型和 AgentCallCard 组件)
+- Commit 866d7b3: FOUND (feat: StepCard 集成 AgentCallCard)
+- Commit cb92866: FOUND (docs: complete 06-03 计划)
+
+No missing files or commits. All claims in SUMMARY.md verified.
+
 ---
 *Phase: 06-agent-as-tool*
 *Completed: 2026-05-30*
