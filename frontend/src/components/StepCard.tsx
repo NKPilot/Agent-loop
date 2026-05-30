@@ -190,6 +190,9 @@ const StepCard = memo(function StepCard({ step, toolCalls, isLastActive }: StepC
   const inlineToolCalls = getToolCallInfosFromEvents(step.events, toolCalls);
   const hasToolCall = step.events.some((e) => e.event_type === "tool_call_start");
   const hasToolResult = inlineToolCalls.some((tc) => tc.result != null);
+  const hasErrorResult = inlineToolCalls.some((tc) => tc.is_error);
+  const successResults = inlineToolCalls.filter((tc) => tc.result != null && !tc.is_error);
+  const errorResults = inlineToolCalls.filter((tc) => tc.result != null && tc.is_error);
   const hasThinking = displayText.length > 0;
 
   // Guard events
@@ -279,30 +282,65 @@ const StepCard = memo(function StepCard({ step, toolCalls, isLastActive }: StepC
 
         {/* Phase 3: OBSERVE — tool results (shown inline when available) */}
         {hasToolResult && (
-          <div className="border-l-2 border-l-green-400 pl-3">
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <Eye className="size-3.5 text-green-500" />
-              <span className="text-[11px] font-medium text-green-600 dark:text-green-400">
-                OBSERVE
-              </span>
-            </div>
-            <div className="space-y-1.5">
-              {inlineToolCalls
-                .filter((tc) => tc.result != null)
-                .map((tc) => (
-                  <div
-                    key={`result-${tc.tool_call_id}`}
-                    className="rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs"
-                  >
-                    <span className="font-mono font-medium text-muted-foreground">
-                      {tc.tool_name}
-                    </span>
-                    <pre className="mt-1 whitespace-pre-wrap text-[11px] text-foreground/80">
-                      {tc.result}
-                    </pre>
-                  </div>
-                ))}
-            </div>
+          <div className="space-y-2">
+            {/* Success results */}
+            {successResults.length > 0 && (
+              <div className="border-l-2 border-l-green-400 pl-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Eye className="size-3.5 text-green-500" />
+                  <span className="text-[11px] font-medium text-green-600 dark:text-green-400">
+                    OBSERVE
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {successResults.map((tc) => (
+                    <div
+                      key={`result-${tc.tool_call_id}`}
+                      className="rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs"
+                    >
+                      <span className="font-mono font-medium text-muted-foreground">
+                        {tc.tool_name}
+                      </span>
+                      <pre className="mt-1 whitespace-pre-wrap text-[11px] text-foreground/80">
+                        {tc.result}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Error results */}
+            {errorResults.length > 0 && (
+              <div className="border-l-2 border-l-red-400 pl-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <AlertTriangle className="size-3.5 text-red-500" />
+                  <span className="text-[11px] font-medium text-red-600 dark:text-red-400">
+                    OBSERVE (Error)
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {errorResults.map((tc) => (
+                    <div
+                      key={`error-${tc.tool_call_id}`}
+                      className="rounded-md border border-red-400/40 bg-red-50/50 dark:bg-red-950/20 px-2.5 py-1.5 text-xs"
+                    >
+                      <span className="font-mono font-medium text-red-700 dark:text-red-300">
+                        {tc.tool_name}
+                        {tc.duration_ms != null && (
+                          <span className="ml-2 font-normal text-muted-foreground">
+                            ({tc.duration_ms}ms)
+                          </span>
+                        )}
+                      </span>
+                      <pre className="mt-1 whitespace-pre-wrap text-[11px] text-red-700/80 dark:text-red-300/80">
+                        {tc.result}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
