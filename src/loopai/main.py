@@ -106,9 +106,11 @@ def create_agent_components(
         bus, confirmation_timeout=config.confirmation_timeout
     )
 
-    # Register Bash tool
+    # Register Bash tool + disk tools
     bash_fn = create_bash_tool(working_dir=config.tool_working_dir)
     registry.register(bash_fn)
+    from loopai.tools.disk_tools import register_disk_tools
+    register_disk_tools(registry, working_dir=config.tool_working_dir)
 
     # ── Wire up context management (Phase 3) ──────────────────────────
     token_counter = TokenCounter()

@@ -168,6 +168,7 @@ class ReActFSM:
         )
 
         transition = "REASON_to_FINISH"
+        step_token_usage = None
 
         try:
             # Guard: validate message structure before LLM call
@@ -261,6 +262,7 @@ class ReActFSM:
 
             content = response.get("content", "")
             tool_calls: list[dict[str, Any]] = response.get("tool_calls", []) or []
+            step_token_usage = response.get("token_usage")  # captured from LLM stream
 
             # Build assistant message
             add_kwargs: dict[str, Any] = {"role": "assistant"}
@@ -316,7 +318,7 @@ class ReActFSM:
             transition = "REASON_to_ERROR"
             self._exit_reason = "error"
 
-        # Publish StepEnd
+        # Publish StepEnd with token usage from LLM response
         await self.bus.publish(
             "step_end",
             {
@@ -324,7 +326,7 @@ class ReActFSM:
                 "session_id": session.session_id,
                 "step_num": step_num,
                 "state_transition": transition,
-                "token_usage": None,
+                "token_usage": step_token_usage,
             },
         )
 

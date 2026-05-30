@@ -76,6 +76,7 @@ class LLMClient:
         # Accumulators
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
+        token_usage: dict[str, int] | None = None
         tool_calls_acc: dict[int, dict[str, Any]] = {}  # index -> {name, id, args_str}
         tool_starts_emitted: set[int] = set()
 
@@ -83,6 +84,14 @@ class LLMClient:
             stream = await self._async_client.chat.completions.create(**stream_kwargs)
 
             async for chunk in stream:
+                # Capture usage from final chunk (stream_options include_usage)
+                if getattr(chunk, "usage", None):
+                    token_usage = {
+                        "prompt_tokens": chunk.usage.prompt_tokens,
+                        "completion_tokens": chunk.usage.completion_tokens,
+                        "total_tokens": chunk.usage.total_tokens,
+                    }
+
                 for choice in chunk.choices:
                     delta = choice.delta
 
@@ -176,6 +185,7 @@ class LLMClient:
                 "tool_calls": tool_calls,
                 "role": "assistant",
                 "reasoning_content": "".join(reasoning_parts) or None,
+                "token_usage": token_usage,
             }
 
         except Exception as exc:
