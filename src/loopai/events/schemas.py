@@ -265,6 +265,33 @@ class EscalationRequired(EventBase):
     error_message: str
 
 
+# ── Agent-as-Tool 事件（Phase 6）───────────────────────────────────────────
+
+
+class AgentCallStart(EventBase):
+    """子 Agent 调用开始时发布——由 AgentTool 发布到主 EventBus。"""
+
+    event_type: Literal["agent_call_start"] = "agent_call_start"
+    step_num: int
+    agent_name: str
+    child_session_id: str
+    tool_call_id: str
+
+
+class AgentCallEnd(EventBase):
+    """子 Agent 调用完成时发布——由 AgentTool 发布到主 EventBus。"""
+
+    event_type: Literal["agent_call_end"] = "agent_call_end"
+    step_num: int
+    agent_name: str
+    child_session_id: str
+    summary: str
+    tool_calls_count: int
+    token_usage: dict | None = None
+    steps: int
+    success: bool
+
+
 # ── 区分联合类型 ──────────────────────────────────────────────────────
 
 Event = Annotated[
@@ -289,6 +316,8 @@ Event = Annotated[
     | CircuitOpened
     | CircuitClosed
     | FailureRegistered
-    | EscalationRequired,
+    | EscalationRequired
+    | AgentCallStart
+    | AgentCallEnd,
     Field(discriminator="event_type"),
 ]
