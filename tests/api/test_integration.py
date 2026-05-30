@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from loopai.api.app import create_app
 from loopai.events.bus import EventBus
+from loopai.state_machine.fsm import AgentState
 from loopai.state_machine.guards import PermissionGuard
 
 
@@ -29,8 +30,7 @@ class _IntegrationMockSession:
         import uuid
 
         self.session_id = session_id or str(uuid.uuid4())
-        self.state = MagicMock()
-        self.state.value = "REASON"
+        self.state = AgentState.REASON
         self.step_count = 0
         self.messages = []
 
@@ -52,7 +52,7 @@ class _IntegrationMockFSM:
             },
         )
         session.step_count = 1
-        session.state.value = "FINISH"
+        session.state = AgentState.FINISH
         await self.bus.publish(
             "step_end",
             {
