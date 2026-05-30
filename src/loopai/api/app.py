@@ -39,6 +39,11 @@ def create_app() -> FastAPI:
     """
     app = FastAPI(title="loopAI API", lifespan=lifespan)
 
+    # 立即初始化状态（生产环境由 lifespan 重新初始化，测试环境无需 lifespan）
+    app.state.bus = EventBus()
+    app.state.active_sessions = {}
+    app.state.session_queues = {}
+
     # Vite 开发服务器和本地开发的 CORS 配置
     app.add_middleware(
         CORSMiddleware,

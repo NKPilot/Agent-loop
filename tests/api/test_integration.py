@@ -91,7 +91,7 @@ class _IntegrationMockLogger:
         self.stopped = True
 
 
-def _make_integration_components(config, prompt, bus):
+def _make_integration_components(config, prompt, bus, max_steps_override=None):
     """Create mock components for integration testing.
 
     Uses a real PermissionGuard (needed for confirm tests) and mock FSM
@@ -289,7 +289,7 @@ class _ErrorMockFSM:
         raise RuntimeError("Simulated agent failure")
 
 
-def _make_error_components(config, prompt, bus):
+def _make_error_components(config, prompt, bus, max_steps_override=None):
     """Create components with a failing FSM."""
     session = _IntegrationMockSession()
     return {
