@@ -118,7 +118,7 @@ def register_disk_tools(
     # ── 1. disk_df: 磁盘使用概览 ─────────────────────────────────
 
     @tool(
-        name="disk.df",
+        name="disk_df",
         description=(
             "显示磁盘使用概览。返回文件系统、总大小、已用空间、可用空间、"
             "挂载点。用于快速了解磁盘空间状况。"
@@ -150,7 +150,7 @@ def register_disk_tools(
     # ── 2. disk_du: 定位大文件目录 ───────────────────────────────
 
     @tool(
-        name="disk.du",
+        name="disk_du",
         description=(
             "定位大文件目录。返回指定目录下各子目录的磁盘使用量（降序排列）。"
             "用于找出占用空间最大的目录。"
@@ -195,7 +195,7 @@ def register_disk_tools(
     # ── 3. disk_find: 按大小/类型筛选文件 ─────────────────────────
 
     @tool(
-        name="disk.find",
+        name="disk_find",
         description=(
             "按大小/类型筛选文件。查找大于指定大小的文件或匹配模式的文件。"
             "用于精准定位占用空间的大文件。"
@@ -244,7 +244,7 @@ def register_disk_tools(
     # ── 4. disk_rm: 删除文件或目录 ───────────────────────────────
 
     @tool(
-        name="disk.rm",
+        name="disk_rm",
         description=(
             "删除指定的文件或目录。**危险操作**——执行前必须经过用户确认。"
             "删除操作严格限制在沙箱目录内，无法删除沙箱外的文件。"
