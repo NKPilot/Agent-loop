@@ -1,7 +1,7 @@
-""":mod:`loopai.context.token_counter` — Token counting via tiktoken.
+""":mod:`loopai.context.token_counter` — 基于 tiktoken 的 Token 计数。
 
-Provides :class:`TokenProtocol` as a provider-tokenizer interface (D-04)
-and :class:`TokenCounter` as the concrete tiktoken-based implementation.
+提供 :class:`TokenizerProtocol` 作为提供商-分词器接口（D-04），
+以及 :class:`TokenCounter` 作为基于 tiktoken 的具体实现。
 
 OpenAI 消息格式计数规范:
     - 基础消息开销: 3 tokens（role 标记）
@@ -20,72 +20,71 @@ import tiktoken
 
 @runtime_checkable
 class TokenizerProtocol(Protocol):
-    """Provider-tokenizer interface (D-04).
+    """提供商-分词器接口（D-04）。
 
-    Reserved for future provider-specific tokenizers
-    (DeepSeek, Anthropic, etc.).  TokenCounter is the only implementation
-    in Phase 3.
+    保留供将来提供商特定的分词器使用
+    （DeepSeek、Anthropic 等）。TokenCounter 是 Phase 3 中唯一的实现。
     """
 
     def count_text(self, text: str) -> int:
-        """Count tokens in a plain text string."""
+        """统计纯文本字符串中的 token 数。"""
         ...
 
     def count_message(self, message: dict) -> int:
-        """Count tokens in a single OpenAI-format message dict."""
+        """统计单条 OpenAI 格式消息字典中的 token 数。"""
         ...
 
     def count_messages(self, messages: list[dict]) -> int:
-        """Count tokens across a list of messages."""
+        """统计消息列表中的 token 总数。"""
         ...
 
 
 class TokenCounter:
-    """Token counting using tiktoken with cl100k_base encoding.
+    """使用 tiktoken 和 cl100k_base 编码进行 token 计数。
 
-    Implements :class:`TokenizerProtocol`.
+    实现 :class:`TokenizerProtocol`。
 
     Args:
-        encoding_name: The tiktoken encoding to use.  Defaults to
-            ``"cl100k_base"`` which is suitable for GPT-4 and GPT-3.5
-            models (D-03).
+        encoding_name: 要使用的 tiktoken 编码。默认为
+            ``"cl100k_base"``，适用于 GPT-4 和 GPT-3.5
+            模型（D-03）。
     """
 
     def __init__(self, encoding_name: str = "cl100k_base") -> None:
         self._encoding = tiktoken.get_encoding(encoding_name)
 
-    # ── Public API ──────────────────────────────────────────────────
+    # ── 公共 API ──────────────────────────────────────────────────
 
     def count_text(self, text: str) -> int:
-        """Count tokens in a plain text string.
+        """统计纯文本字符串中的 token 数。
 
         Args:
-            text: The input text to encode.
+            text: 要编码的输入文本。
 
         Returns:
-            Number of tokens.
+            Token 数量。
         """
         return len(self._encoding.encode(text))
 
     def count_message(self, message: dict) -> int:
-        """Count tokens in a single OpenAI-format message dict.
+        """统计单条 OpenAI 格式消息字典中的 token 数。
 
-        The counting follows the OpenAI tiktoken cookbook specification:
+        计数遵循 OpenAI tiktoken cookbook 规范：
 
-        - Base overhead: 3 tokens per message (for ``role`` markers).
-        - ``content`` (str): token count of the text.
-        - ``name`` (optional): 1 extra token + token count of the name.
-        - ``tool_calls`` (optional): 3 tokens base + per-call cost
-          (tool name + arguments).
+        - 基础开销：每条消息 3 tokens（用于 ``role`` 标记）。
+        - ``content``（str）：文本的 token 数。
+        - ``name``（可选）：1 个额外 token + name 的 token 数。
+        - ``tool_calls``（可选）：3 tokens 基础 + 每条调用的成本
+          （工具名称 + arguments）。
 
         Args:
-            message: An OpenAI-format message dict (e.g.
-                ``{"role": "user", "content": "Hello"}``).
+            message: OpenAI 格式的消息字典（例如
+                ``{"role": "user", "content": "Hello"}``）。
 
         Returns:
-            Number of tokens for this message.
+            此消息的 token 数。
         """
-        tokens = 3  # Base overhead per message (role markers)
+        tokens = 3  # 每条消息的基础开销（角色标记）
 
         content = message.get("content")
         if content:
@@ -97,9 +96,9 @@ class TokenCounter:
 
         tool_calls = message.get("tool_calls")
         if tool_calls:
-            tokens += 3  # Base overhead for tool_calls
+            tokens += 3  # tool_calls 的基础开销
             for tc in tool_calls:
-                # tool_calls can be a dict (raw API response) or an object
+                # tool_calls 可以是字典（原始 API 响应）或对象
                 if isinstance(tc, dict):
                     tc_data = tc
                 else:
@@ -111,7 +110,7 @@ class TokenCounter:
                         function_info.get("name", "") + function_info.get("arguments", "")
                     )
                 else:
-                    # If function is an object with name/arguments attrs
+                    # 如果 function 是带有 name/arguments 属性的对象
                     tokens += self.count_text(
                         getattr(function_info, "name", "")
                         + getattr(function_info, "arguments", "")
@@ -120,17 +119,17 @@ class TokenCounter:
         return tokens
 
     def count_messages(self, messages: list[dict]) -> int:
-        """Count tokens across a list of messages.
+        """统计消息列表中的 token 总数。
 
-        Sums the token count of each message and adds 3 tokens at the end
-        for the assistant-role glue overhead.
+        将每条消息的 token 数相加，并在末尾加上 3 tokens
+        用于 assistant 角色粘合开销。
 
         Args:
-            messages: A list of OpenAI-format message dicts.
+            messages: OpenAI 格式的消息字典列表。
 
         Returns:
-            Total number of tokens for the message list.
+            消息列表的 token 总数。
         """
         total = sum(self.count_message(m) for m in messages)
-        total += 3  # Assistant-role glue overhead
+        total += 3  # Assistant 角色粘合开销
         return total

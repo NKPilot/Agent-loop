@@ -1,34 +1,34 @@
-""":mod:`loopai.tools.bash` — BashTool: safe subprocess execution with shell=False.
+""":mod:`loopai.tools.bash` — BashTool：安全的子进程执行，shell=False。
 
-Provides :class:`BashTool` for executing shell commands through a secure
-``subprocess.run`` wrapper that enforces ``shell=False``, command
-classification via :class:`CommandClassifier`, shell metacharacter
-interception, timeout control, and output truncation.
+提供 :class:`BashTool` 用于通过安全的 ``subprocess.run`` 封装
+执行 shell 命令，强制执行 ``shell=False``、通过
+:class:`CommandClassifier` 进行命令分类、shell 元字符拦截、
+超时控制和输出截断。
 
-The module also exports :func:`create_bash_tool`, a factory that returns a
-``@tool``-decorated callable suitable for registration with :class:`ToolRegistry`.
+该模块还导出 :func:`create_bash_tool`，这是一个工厂函数，
+返回一个 ``@tool`` 装饰的可调用对象，适合注册到 :class:`ToolRegistry`。
 
-Decision references:
-    D-05: ToolResult standardized wrapper
-    D-07: Bash tool default timeout 60 s
-    D-08: Whitelist/blacklist classification via CommandClassifier
-    D-14: Minimal tool set for disk diagnosis (df, du, find, rm)
+决策引用:
+    D-05: ToolResult 标准化包装
+    D-07: Bash 工具默认超时 60 秒
+    D-08: 通过 CommandClassifier 的白名单/黑名单分类
+    D-14: 磁盘诊断的最小工具集（df, du, find, rm）
 
-Security:
-    - Always ``shell=False`` + argument list (never a string)
-    - Shell metacharacters (``|``, ``;``, ``&``, ``$``, backticks) are rejected
-    - Every command is classified before execution
-    - Output is truncated at ``max_output_bytes`` to prevent memory exhaustion
+安全:
+    - 始终 ``shell=False`` + 参数列表（从不传字符串）
+    - 拒绝 Shell 元字符（``|``、``;``、``&``、``$``、反引号）
+    - 每条命令执行前都经过分类
+    - 输出截断在 ``max_output_bytes`` 以内，防止内存耗尽
 
-Usage::
+用法::
 
     from loopai.tools.bash import BashTool, create_bash_tool
 
-    # Direct usage
+    # 直接使用
     tool = BashTool(working_dir="/home/user")
     result = await tool.execute("df -h")
 
-    # As a registered tool
+    # 作为已注册工具
     bash_fn = create_bash_tool(working_dir="/home/user")
     registry.register(bash_fn)
 """
@@ -50,26 +50,24 @@ if TYPE_CHECKING:
 
 
 class BashTool:
-    """Safe subprocess executor — wraps ``subprocess.run`` with security layers.
+    """安全子进程执行器——用安全层封装 ``subprocess.run``。
 
-    Every command passes through three gates before execution:
+    每条命令在执行前经过三道闸门：
 
-    1. **Parsing** — ``shlex.split()`` converts the command string into a safe
-       argument list (no shell interpretation).
-    2. **Classification** — :class:`CommandClassifier` assigns a
-       :class:`PermissionLevel` based on command identity and target paths.
-    3. **Metacharacter scan** — Shell metacharacters (``|``, ``;``, ``&``,
-       ``$``, backticks) are detected and rejected before reaching
-       ``subprocess``.
+    1. **解析**——``shlex.split()`` 将命令字符串转换为安全的
+       参数列表（无 shell 解释）。
+    2. **分类**——:class:`CommandClassifier` 根据命令标识和
+       目标路径分配 :class:`PermissionLevel`。
+    3. **元字符扫描**——在到达 ``subprocess`` 之前检测并拒绝
+       Shell 元字符（``|``、``;``、``&``、``$``、反引号）。
 
-    After execution the output is checked against ``max_output_bytes`` and
-    truncated if necessary.
+    执行后检查输出是否超过 ``max_output_bytes``，必要时进行截断。
 
     Attributes:
-        working_dir: Working directory for subprocess execution.
-        default_timeout: Default timeout in seconds (60 s per D-07).
-        max_output_bytes: Maximum stdout bytes before truncation (100 KB).
-        classifier: :class:`CommandClassifier` instance for command classification.
+        working_dir: 子进程执行的工作目录。
+        default_timeout: 默认超时秒数（D-07 规定 60 秒）。
+        max_output_bytes: 截断前最大 stdout 字节数（100 KB）。
+        classifier: 用于命令分类的 :class:`CommandClassifier` 实例。
     """
 
     def __init__(
@@ -83,7 +81,7 @@ class BashTool:
         self.max_output_bytes = max_output_bytes
         self.classifier = CommandClassifier()
 
-    # ── Public API ──────────────────────────────────────────────────────
+    # ── 公共 API ──────────────────────────────────────────────────────
 
     async def execute(
         self,
@@ -91,21 +89,21 @@ class BashTool:
         args: list[str] | None = None,
         timeout: float | None = None,
     ) -> ToolResult:
-        """Execute a shell command through the security pipeline.
+        """通过安全管道执行 shell 命令。
 
         Args:
-            command: The command string (e.g. ``"ls -la"``, ``"df -h"``).
-            args: Optional explicit argument list.  If ``None``, *command*
-                is parsed with :func:`shlex.split`.
-            timeout: Per-call timeout override in seconds.  Falls back to
-                :attr:`default_timeout` (60 s).
+            command: 命令字符串（例如 ``"ls -la"``、``"df -h"``）。
+            args: 可选的显式参数列表。如为 ``None``，则用
+                :func:`shlex.split` 解析 *command*。
+            timeout: 每次调用的超时覆盖，秒。回退到
+                :attr:`default_timeout`（60 秒）。
 
         Returns:
-            A :class:`ToolResult` with success/error status and captured output.
+            包含成功/错误状态和捕获输出的 :class:`ToolResult`。
         """
         effective_timeout = timeout if timeout is not None else self.default_timeout
 
-        # ── Step 1: Parse command into argument list ─────────────────
+        # ── 第 1 步：将命令解析为参数列表 ─────────────────────────
         if args is None:
             try:
                 parsed = shlex.split(command)
@@ -125,12 +123,12 @@ class BashTool:
             cmd_name = command
             cmd_args = list(args)
 
-        # ── Step 2: Classify via CommandClassifier ───────────────────
+        # ── 第 2 步：通过 CommandClassifier 分类 ────────────────
         level, reason = self.classifier.classify(
             cmd_name, cmd_args, self.working_dir
         )
 
-        # ── Step 3: Security scan — block shell metacharacters ───────
+        # ── 第 3 步：安全扫描——阻止 shell 元字符 ──────────────
         meta_detail = self._scan_metacharacters(command)
         if meta_detail:
             return ToolResult.error(
@@ -138,12 +136,12 @@ class BashTool:
                 duration_ms=0.0,
             )
 
-        # ── Step 4: Execute via subprocess with timeout ──────────────
+        # ── 第 4 步：通过 subprocess 执行，带超时 ──────────────
         args_list = [cmd_name] + cmd_args
 
         start = time.monotonic()
         try:
-            # Run subprocess in a thread to avoid blocking the event loop.
+            # 在线程中运行子进程，避免阻塞事件循环。
             proc_result = await asyncio.wait_for(
                 asyncio.to_thread(
                     subprocess.run,
@@ -154,7 +152,7 @@ class BashTool:
                     shell=False,
                     cwd=self.working_dir,
                 ),
-                timeout=effective_timeout + 5.0,  # safety margin for thread
+                timeout=effective_timeout + 5.0,  # 线程安全余量
             )
         except asyncio.TimeoutError:
             duration_ms = (time.monotonic() - start) * 1000
@@ -183,7 +181,7 @@ class BashTool:
 
         duration_ms = (time.monotonic() - start) * 1000
 
-        # ── Step 5: Check return code ────────────────────────────────
+        # ── 第 5 步：检查返回码 ──────────────────────────────────
         if proc_result.returncode != 0:
             err_detail = (
                 proc_result.stderr.strip()
@@ -195,7 +193,7 @@ class BashTool:
                 duration_ms=duration_ms,
             )
 
-        # ── Step 6: Truncate output if needed ────────────────────────
+        # ── 第 6 步：必要时截断输出 ────────────────────────────
         output: str = (
             proc_result.stdout if proc_result.stdout else proc_result.stderr
         )
@@ -212,22 +210,22 @@ class BashTool:
             truncated=truncated,
         )
 
-    # ── Internal helpers ─────────────────────────────────────────────────
+    # ── 内部辅助 ─────────────────────────────────────────────────────
 
-    # Shell metacharacter pattern: pipe, semicolon, background, dollar sign,
-    # backtick, command substitution, logic operators.
+    # Shell 元字符模式：管道符、分号、后台、美元符号、
+    # 反引号、命令替换、逻辑运算符。
     _META_PATTERN: re.Pattern = re.compile(r"[|;&`$]|\$\(|&&|\|\|")
 
     @classmethod
     def _scan_metacharacters(cls, command: str) -> str | None:
-        """Scan *command* for dangerous shell metacharacters.
+        """扫描 *command* 中是否存在危险的 shell 元字符。
 
         Args:
-            command: The raw command string to inspect.
+            command: 要检查的原始命令字符串。
 
         Returns:
-            A human-readable description of the first metacharacter found,
-            or ``None`` if the command is safe.
+            找到的第一个元字符的人类可读描述，
+            或 ``None`` 表示命令安全。
         """
         match = cls._META_PATTERN.search(command)
         if not match:
@@ -247,22 +245,22 @@ class BashTool:
         return f"检测到 {desc}，出于安全原因已拒绝执行"
 
 
-# ── Factory function for @tool registration ─────────────────────────────
+# ── 用于 @tool 注册的工厂函数 ─────────────────────────────────────────
 
 
 def create_bash_tool(working_dir: str = "/home/user") -> "callable":
-    """Create a ``@tool``-decorated bash execution function.
+    """创建一个 ``@tool`` 装饰的 bash 执行函数。
 
-    The returned function accepts a single ``command: str`` argument and
-    returns the command output as a string.  It carries a
-    :attr:`__tool_meta__` attribute with full :class:`ToolMetadata` so it
-    can be registered with :class:`~loopai.tools.registry.ToolRegistry`.
+    返回的函数接受单个 ``command: str`` 参数，
+    并将命令输出作为字符串返回。它携带一个
+    :attr:`__tool_meta__` 属性，包含完整的 :class:`ToolMetadata`，
+    以便注册到 :class:`~loopai.tools.registry.ToolRegistry`。
 
     Args:
-        working_dir: Working directory for BashTool subprocess execution.
+        working_dir: BashTool 子进程执行的工作目录。
 
     Returns:
-        A ``@tool``-decorated async callable with metadata attached.
+        一个 ``@tool`` 装饰的异步可调用对象，附带了元数据。
 
     Example::
 
@@ -291,13 +289,13 @@ def create_bash_tool(working_dir: str = "/home/user") -> "callable":
         tags=["bash", "system"],
     )
     async def bash_execute(command: str) -> str:
-        """Execute a bash command and return the output.
+        """执行 bash 命令并返回输出。
 
         Args:
-            command: The shell command to execute (e.g. "df -h").
+            command: 要执行的 shell 命令（例如 "df -h"）。
 
         Returns:
-            The command's stdout output as a string.
+            命令的 stdout 输出字符串。
         """
         result = await bash_tool_instance.execute(command)
         if result.is_error:

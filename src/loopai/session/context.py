@@ -1,11 +1,11 @@
-"""Session data class and AgentState enum for the loopAI agent framework.
+"""loopAI Agent 框架的 Session 数据类和 AgentState 枚举。
 
-Session provides a normalized state container for the ReAct FSM:
-- Messages array in OpenAI-compatible format
-- Step counter and tool call history
-- AgentState tracking through the REASON/ACT/OBSERVE/FINISH/ERROR cycle
+Session 为 ReAct FSM 提供标准化的状态容器：
+- OpenAI 兼容格式的消息数组
+- 步骤计数器和工具调用历史
+- 通过 REASON/ACT/OBSERVE/FINISH/ERROR 循环的 AgentState 追踪
 
-See: .planning/phases/01-agent-core-loop/01-CONTEXT.md D-02 (five states)
+参见: .planning/phases/01-agent-core-loop/01-CONTEXT.md D-02（五个状态）
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ if TYPE_CHECKING:
 
 
 class AgentState(str, Enum):
-    """ReAct agent FSM states as defined in D-02.
+    """D-02 中定义的 ReAct Agent FSM 状态。
 
-    REASON is the entry point. Each loop iteration starts from REASON.
+    REASON 是入口点。每次循环迭代从 REASON 开始。
     """
 
     REASON = "reason"
@@ -35,20 +35,19 @@ class AgentState(str, Enum):
 
 @dataclass
 class Session:
-    """Canonical state container for the ReAct agent loop.
+    """ReAct Agent 循环的规范状态容器。
 
-    Holds conversation history, step counter, tool call log, and
-    the current AgentState. The FSM (Plan 05) reads and writes this
-    object at each step.
+    持有对话历史、步骤计数器、工具调用日志和当前的 AgentState。
+    FSM（Plan 05）在每个步骤中读取和写入此对象。
 
     Attributes:
-        session_id: Auto-generated UUID string identifying this session.
-        state: Current agent state, defaults to REASON.
-        messages: List of message dicts in OpenAI-compatible format.
-        step_count: Number of completed loop iterations.
-        tool_history: Log of (tool_name, signature) tuples for loop detection.
-        created_at: ISO 8601 timestamp of session creation.
-        config: Optional AgentConfig reference for this session.
+        session_id: 标识此会话的自动生成 UUID 字符串。
+        state: 当前 Agent 状态，默认为 REASON。
+        messages: OpenAI 兼容格式的消息字典列表。
+        step_count: 已完成的循环迭代次数。
+        tool_history: 用于循环检测的 (tool_name, signature) 元组日志。
+        created_at: 会话创建的 ISO 8601 时间戳。
+        config: 此会话的可选 AgentConfig 引用。
     """
 
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -70,23 +69,23 @@ class Session:
         tool_call_id: str | None = None,
         name: str | None = None,
     ) -> dict[str, Any]:
-        """Append a message to the conversation history.
+        """向对话历史追加一条消息。
 
-        Builds an OpenAI-compatible message dict for the given role.
-        Supports all four API roles: system, user, assistant, tool.
+        为给定的 role 构建一个 OpenAI 兼容的消息字典。
+        支持所有四种 API 角色：system、user、assistant、tool。
 
         Args:
-            role: One of "system", "user", "assistant", "tool".
-            content: Text content of the message (may be None for tool_calls).
-            tool_calls: Optional list of tool call dicts (assistant role only).
-            tool_call_id: Tool call ID this message responds to (tool role only).
-            name: Optional function name (tool role only).
+            role: "system"、"user"、"assistant"、"tool" 之一。
+            content: 消息的文本内容（tool_calls 可为 None）。
+            tool_calls: 可选的工具调用字典列表（仅 assistant 角色）。
+            tool_call_id: 此消息响应的工具调用 ID（仅 tool 角色）。
+            name: 可选的函数名称（仅 tool 角色）。
 
         Returns:
-            The constructed message dict that was appended to messages.
+            追加到 messages 的已构造消息字典。
 
         Raises:
-            ValueError: If role is not one of the four valid API roles.
+            ValueError: 如果 role 不是四种有效 API 角色之一。
         """
         valid_roles = {"system", "user", "assistant", "tool"}
         if role not in valid_roles:
@@ -112,23 +111,23 @@ class Session:
         return message
 
     def increment_step(self) -> int:
-        """Increment the step counter by one.
+        """将步骤计数器加一。
 
         Returns:
-            The new step count after incrementing.
+            递增后的新步骤计数。
         """
         self.step_count += 1
         return self.step_count
 
     def record_tool_call(self, tool_name: str, signature: str) -> None:
-        """Record a tool invocation in the tool history.
+        """在工具历史中记录一次工具调用。
 
-        The signature should be a hash or unique representation of the
-        tool arguments, used by the loop detector (Plan 02 guards) to
-        detect repeated identical calls.
+        signature 应该是工具参数的哈希或唯一表示，
+        由循环检测器（Plan 02 guards）使用以检测
+        重复的完全相同的调用。
 
         Args:
-            tool_name: Name of the invoked tool.
-            signature: Unique argument signature to detect repeated calls.
+            tool_name: 被调用工具的名称。
+            signature: 用于检测重复调用的唯一参数签名。
         """
         self.tool_history.append((tool_name, signature))

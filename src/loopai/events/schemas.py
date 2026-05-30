@@ -1,8 +1,8 @@
-"""Event schemas for the loopAI Event Bus.
+"""loopAI 事件总线的事件模式定义。
 
-Defines 13 pydantic models (1 base + 12 concrete) for all event types
-in the ReAct agent loop. Uses discriminated unions for type-safe
-deserialization and routing.
+定义了 ReAct Agent 循环中所有事件类型的 13 个 Pydantic 模型
+（1 个基类 + 12 个具体模型）。使用区分联合类型实现类型安全的
+反序列化和路由。
 """
 
 from datetime import datetime, timezone
@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 
 class EventBase(BaseModel):
-    """Base event with shared fields for all event types."""
+    """所有事件类型共享字段的基础事件模型。"""
 
     event_type: Literal[str]
     session_id: str
@@ -21,18 +21,18 @@ class EventBase(BaseModel):
     )
 
 
-# ── Top-level lifecycle events ──────────────────────────────────────
+# ── 顶层生命周期事件 ──────────────────────────────────────────────────
 
 
 class StepStart(EventBase):
-    """Emitted at the start of each agent loop step."""
+    """每个 Agent 循环步骤开始时发出。"""
 
     event_type: Literal["step_start"] = "step_start"
     step_num: int
 
 
 class StepEnd(EventBase):
-    """Emitted when a step completes, with state transition info."""
+    """步骤完成时发出，包含状态转换信息。"""
 
     event_type: Literal["step_end"] = "step_end"
     step_num: int
@@ -41,7 +41,7 @@ class StepEnd(EventBase):
 
 
 class SessionEnd(EventBase):
-    """Emitted when the agent session terminates."""
+    """Agent 会话终止时发出。"""
 
     event_type: Literal["session_end"] = "session_end"
     final_state: str
@@ -49,11 +49,11 @@ class SessionEnd(EventBase):
     exit_reason: str
 
 
-# ── Inner streaming events ──────────────────────────────────────────
+# ── 内部流式事件 ──────────────────────────────────────────────────────
 
 
 class LLMToken(EventBase):
-    """Emitted for each token delta during LLM streaming."""
+    """LLM 流式输出中每个 token 增量时发出。"""
 
     event_type: Literal["llm_token"] = "llm_token"
     step_num: int
@@ -61,7 +61,7 @@ class LLMToken(EventBase):
 
 
 class LLMContentDone(EventBase):
-    """Emitted when the LLM finishes generating content for a step."""
+    """LLM 完成某步骤的内容生成时发出。"""
 
     event_type: Literal["llm_content_done"] = "llm_content_done"
     step_num: int
@@ -69,7 +69,7 @@ class LLMContentDone(EventBase):
 
 
 class ToolCallStart(EventBase):
-    """Emitted when the LLM initiates a tool call."""
+    """LLM 发起工具调用时发出。"""
 
     event_type: Literal["tool_call_start"] = "tool_call_start"
     step_num: int
@@ -78,7 +78,7 @@ class ToolCallStart(EventBase):
 
 
 class ToolCallArgs(EventBase):
-    """Emitted for each args delta during streaming tool argument generation."""
+    """流式工具参数生成期间每个参数增量时发出。"""
 
     event_type: Literal["tool_call_args"] = "tool_call_args"
     step_num: int
@@ -87,7 +87,7 @@ class ToolCallArgs(EventBase):
 
 
 class ToolCallDone(EventBase):
-    """Emitted when all tool arguments have been received."""
+    """所有工具参数接收完成时发出。"""
 
     event_type: Literal["tool_call_done"] = "tool_call_done"
     step_num: int
@@ -97,7 +97,7 @@ class ToolCallDone(EventBase):
 
 
 class ToolResult(EventBase):
-    """Emitted after a tool finishes execution."""
+    """工具执行完成后发出。"""
 
     event_type: Literal["tool_result"] = "tool_result"
     step_num: int
@@ -108,11 +108,11 @@ class ToolResult(EventBase):
     duration_ms: float
 
 
-# ── Guard events ─────────────────────────────────────────────────────
+# ── 守卫事件 ──────────────────────────────────────────────────────────
 
 
 class BudgetWarning(EventBase):
-    """Emitted when step budget reaches 80% threshold."""
+    """步骤预算达到 80% 阈值时发出。"""
 
     event_type: Literal["budget_warning"] = "budget_warning"
     step_num: int
@@ -121,14 +121,14 @@ class BudgetWarning(EventBase):
 
 
 class BudgetExhausted(EventBase):
-    """Emitted when the step budget is fully consumed."""
+    """步骤预算完全耗尽时发出。"""
 
     event_type: Literal["budget_exhausted"] = "budget_exhausted"
     step_num: int
 
 
 class LoopDetected(EventBase):
-    """Emitted when a tool call loop is detected."""
+    """检测到工具调用循环时发出。"""
 
     event_type: Literal["loop_detected"] = "loop_detected"
     step_num: int
@@ -137,7 +137,7 @@ class LoopDetected(EventBase):
 
 
 class Error(EventBase):
-    """Emitted when an error occurs during agent execution."""
+    """Agent 执行期间发生错误时发出。"""
 
     event_type: Literal["error"] = "error"
     step_num: int
@@ -146,16 +146,16 @@ class Error(EventBase):
     traceback: str | None = None
 
 
-# ── Confirmation events (Phase 2, D-09) ───────────────────────────────
+# ── 确认事件（Phase 2, D-09）───────────────────────────────────────────
 
 
 class ConfirmationRequired(EventBase):
-    """Dangerous command confirmation request — published by PermissionGuard via EventBus.
+    """危险命令确认请求——由 PermissionGuard 通过 EventBus 发布。
 
-    Decision D-09: Event-driven confirmation pause. The Agent loop pauses in the
-    ACT state while waiting for user response (y/n) to a confirmation_required event.
-    The CLI consumer (or Phase 5 web dashboard) displays the command details and
-    collects the user's decision.
+    决策 D-09：事件驱动的确认暂停。Agent 循环在 ACT 状态中暂停，
+    等待用户对 confirmation_required 事件的响应（y/n）。
+    CLI 消费者（或 Phase 5 Web 仪表盘）显示命令详情并
+    收集用户决定。
     """
 
     event_type: Literal["confirmation_required"] = "confirmation_required"
@@ -163,15 +163,15 @@ class ConfirmationRequired(EventBase):
     confirmation_id: str
     tool_name: str
     tool_args: dict
-    permission_level: str  # "dangerous" — matching PermissionLevel.DANGEROUS.value
-    reason: str  # Human-readable (Chinese) explanation, e.g. "命中黑名单命令 rm"
+    permission_level: str  # "dangerous"——匹配 PermissionLevel.DANGEROUS.value
+    reason: str  # 人类可读（中文）说明，如"命中黑名单命令 rm"
 
 
 class ConfirmationResponse(EventBase):
-    """User response to a confirmation request — published by the CLI consumer.
+    """用户对确认请求的响应——由 CLI 消费者发布。
 
-    The PermissionGuard.wait() coroutine is unblocked when this event is published.
-    The ``approved`` field carries the user's y/n decision.
+    PermissionGuard.wait() 协程在此事件发布后解除阻塞。
+    ``approved`` 字段携带用户的 y/n 决定。
     """
 
     event_type: Literal["confirmation_response"] = "confirmation_response"
@@ -180,15 +180,14 @@ class ConfirmationResponse(EventBase):
     approved: bool
 
 
-# ── Context management events ────────────────────────────────────────
+# ── 上下文管理事件 ────────────────────────────────────────────────────
 
 
 class ContextCompacted(EventBase):
-    """Published when context compression reduces the token count.
+    """当上下文压缩减少 token 数量时发布。
 
-    The compression engine fires this event after a successful compression,
-    recording how many tokens were freed and how many conversation rounds
-    were summarized.
+    压缩引擎在成功压缩后发出此事件，
+    记录释放了多少 token 以及多少个对话轮次被摘要。
     """
 
     event_type: Literal["context_compacted"] = "context_compacted"
@@ -201,11 +200,10 @@ class ContextCompacted(EventBase):
 
 
 class TokenWarning(EventBase):
-    """Published when token usage approaches the context window limit.
+    """当 token 使用量接近上下文窗口限制时发布。
 
-    The TokenGuard fires this event when usage reaches a configurable
-    threshold (typically 75%), allowing consumers to preview the situation
-    or trigger compression.
+    TokenGuard 在使用量达到可配置阈值（通常为 75%）时发出此事件，
+    允许消费者提前预览情况或触发压缩。
     """
 
     event_type: Literal["token_warning"] = "token_warning"
@@ -216,31 +214,31 @@ class TokenWarning(EventBase):
     action: str
 
 
-# ── Resilience events (Phase 4) ──────────────────────────────────────
+# ── 弹性事件（Phase 4）────────────────────────────────────────────────
 
 
 class CheckpointSaved(EventBase):
-    """Published after session state is persisted to checkpoint file."""
+    """会话状态持久化到检查点文件后发布。"""
 
     event_type: Literal["checkpoint_saved"] = "checkpoint_saved"
     step_count: int
-    state: str  # AgentState.value, e.g. "reason", "act"
-    file_path: str  # checkpoint file path
+    state: str  # AgentState.value，如 "reason"、"act"
+    file_path: str  # 检查点文件路径
 
 
 class CircuitOpened(EventBase):
-    """Published when circuit breaker opens for a tool."""
+    """工具的熔断器打开时发布。"""
 
     event_type: Literal["circuit_opened"] = "circuit_opened"
     tool_name: str
-    failure_rate: float  # failure rate (0.0-1.0) that triggered opening
+    failure_rate: float  # 触发打开的失败率（0.0-1.0）
     window_size: int
-    previous_state: str  # state before transition
+    previous_state: str  # 转换前的状态
     new_state: str  # "open"
 
 
 class CircuitClosed(EventBase):
-    """Published when circuit breaker closes for a tool."""
+    """工具的熔断器关闭时发布。"""
 
     event_type: Literal["circuit_closed"] = "circuit_closed"
     tool_name: str
@@ -249,25 +247,25 @@ class CircuitClosed(EventBase):
 
 
 class FailureRegistered(EventBase):
-    """Published when a tool failure is recorded in FailureRegistry."""
+    """工具失败被记录到 FailureRegistry 时发布。"""
 
     event_type: Literal["failure_registered"] = "failure_registered"
     tool_name: str
-    signature: str  # deterministic hash (same format as LoopDetector._signature)
+    signature: str  # 确定性哈希（与 LoopDetector._signature 格式相同）
     error_message: str
 
 
 class EscalationRequired(EventBase):
-    """Published when 4-layer recovery reaches human escalation (Layer 4)."""
+    """4 层恢复到达人工升级（第 4 层）时发布。"""
 
     event_type: Literal["escalation_required"] = "escalation_required"
     tool_name: str
-    layer: int  # recovery layer reached
+    layer: int  # 到达的恢复层级
     attempt_count: int
     error_message: str
 
 
-# ── Discriminated union type ────────────────────────────────────────
+# ── 区分联合类型 ──────────────────────────────────────────────────────
 
 Event = Annotated[
     StepStart

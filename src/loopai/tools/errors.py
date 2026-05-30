@@ -1,20 +1,20 @@
-""":mod:`loopai.tools.errors` — Error classification and custom exceptions.
+""":mod:`loopai.tools.errors` — 错误分类和自定义异常。
 
-Maps Python exceptions to :class:`ErrorCategory` enum values so the
-:class:`ToolExecutor` can make retry/abort decisions without inspecting
-exception type chains at every call site (D-11, D-13).
+将 Python 异常映射到 :class:`ErrorCategory` 枚举值，
+使 :class:`ToolExecutor` 能够做出重试/中止决策，而无需
+在每个调用点检查异常类型链（D-11, D-13）。
 
-Decision references:
-    D-11: Exception-to-category mapping table
-    D-13: Only TRANSIENT triggers auto-retry
+决策引用:
+    D-11: 异常到类别映射表
+    D-13: 仅 TRANSIENT 触发自动重试
 
-Mapping rules:
+映射规则:
     ============================  ===================
-    Exception type(s)             ErrorCategory
+    异常类型                       ErrorCategory
     ============================  ===================
     TimeoutError, ConnectionError TRANSIENT
     ValueError, TypeError,        TOOL_EXECUTION
-        RuntimeError (default)
+        RuntimeError (默认)
     PermissionError,              GUARD_VIOLATION
         GuardViolationError
     MemoryError, SystemExit,      FATAL
@@ -30,41 +30,41 @@ from loopai.tools.types import ErrorCategory
 
 
 class GuardViolationError(Exception):
-    """Raised when a tool call is blocked by a security guard or permission check.
+    """当工具调用被安全守卫或权限检查阻止时抛出。
 
-    This is a custom exception used alongside :class:`PermissionError` to
-    represent a tool-call-level guard violation (e.g. dangerous command
-    denied, path outside sandbox).  Unlike :exc:`PermissionError` (which comes
-    from the OS), this carries a semantic meaning specific to the tool system.
+    这是一个自定义异常，与 :class:`PermissionError` 一起用于
+    表示工具调用级别的守卫违规（例如危险命令被拒绝、
+    路径超出沙箱范围）。不同于 :exc:`PermissionError`（来自
+    操作系统），它携带了工具系统特有的语义含义。
     """
 
     pass
 
 
 def classify_error(exception: Exception) -> ErrorCategory:
-    """Classify an exception into one of four error categories (D-11).
+    """将异常分类为四种错误类别之一（D-11）。
 
     Args:
-        exception: The caught exception instance.
+        exception: 捕获的异常实例。
 
     Returns:
-        The :class:`ErrorCategory` that determines the executor's recovery
-        strategy (retry, inject error, or terminate).
+        :class:`ErrorCategory`，决定执行器的恢复
+        策略（重试、注入错误或终止）。
     """
-    # ── FATAL — terminate the session ─────────────────────────────
+    # ── FATAL——终止会话 ─────────────────────────────────────────
     if isinstance(exception, (MemoryError, SystemExit, KeyboardInterrupt)):
         return ErrorCategory.FATAL
 
-    # ── GUARD_VIOLATION — denied by security policy ────────────────
+    # ── GUARD_VIOLATION——安全策略拒绝 ──────────────────────────
     if isinstance(exception, (PermissionError, GuardViolationError)):
         return ErrorCategory.GUARD_VIOLATION
 
-    # ── TRANSIENT — retry with backoff ────────────────────────────
+    # ── TRANSIENT——带退避重试 ──────────────────────────────────
     if isinstance(exception, (TimeoutError, ConnectionError, asyncio.TimeoutError)):
         return ErrorCategory.TRANSIENT
 
-    # Check for OSError with transient errno codes (ECONNRESET, ETIMEDOUT,
-    # EHOSTUNREACH, etc.)
+    # 检查具有瞬态 errno 代码的 OSError（ECONNRESET、ETIMEDOUT、
+    # EHOSTUNREACH 等）
     if isinstance(exception, OSError):
         transient_errnos = {
             getattr(__import__("errno"), name, None)
@@ -82,5 +82,5 @@ def classify_error(exception: Exception) -> ErrorCategory:
         if errno_val is not None and errno_val in transient_errnos:
             return ErrorCategory.TRANSIENT
 
-    # ── Default: TOOL_EXECUTION — inject error into LLM context ───
+    # ── 默认: TOOL_EXECUTION——将错误注入 LLM 上下文 ──
     return ErrorCategory.TOOL_EXECUTION

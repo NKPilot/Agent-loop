@@ -1,10 +1,9 @@
-"""ReActFSM: ReAct loop state machine with guard integration.
+"""ReActFSM：集成守卫的 ReAct 循环状态机。
 
-Drives the agent through the REASON -> ACT -> OBSERVE cycle defined in D-02.
-Integrates BudgetGuard, LoopDetector, MessageValidator, and (Phase 2)
-ToolRegistry, ToolExecutor, and PermissionGuard at their specified
-intervention points. Publishes StepStart/StepEnd/SessionEnd events for
-observability.
+驱动 Agent 通过 D-02 中定义的 REASON → ACT → OBSERVE 循环。
+在指定的干预点集成 BudgetGuard、LoopDetector、MessageValidator 以及
+（Phase 2）ToolRegistry、ToolExecutor 和 PermissionGuard。
+发布 StepStart/StepEnd/SessionEnd 事件用于可观测性。
 """
 
 from __future__ import annotations
@@ -38,24 +37,23 @@ if TYPE_CHECKING:
 
 
 class ReActFSM:
-    """ReAct loop finite state machine driving the agent cycle.
+    """驱动 Agent 循环的 ReAct 有限状态机。
 
-    Integrates LLMClient for reasoning, guards for safety, and EventBus
-    for observability. Each iteration through the main loop dispatches to
-    a handler based on the current AgentState.
+    集成 LLMClient 用于推理、守卫用于安全、EventBus 用于可观测性。
+    主循环的每次迭代根据当前 AgentState 分发到相应处理程序。
 
-    Phase 2 additions: ToolRegistry for tool lookup, ToolExecutor for
-    actual tool execution, PermissionGuard for dangerous command confirmation.
+    Phase 2 新增：ToolRegistry 用于工具查找、ToolExecutor 用于
+    实际工具执行、PermissionGuard 用于危险命令确认。
 
     Attributes:
-        client: LLMClient for API calls with streaming.
-        bus: EventBus for publishing observability events.
-        budget_guard: BudgetGuard for step budget enforcement.
-        loop_detector: LoopDetector for tool call loop detection.
-        message_validator: MessageValidator for message structure validation.
-        registry: ToolRegistry for tool metadata lookup and schema export.
-        executor: ToolExecutor for actual tool execution.
-        permission_guard: PermissionGuard for dangerous command confirmation.
+        client: 用于流式 API 调用的 LLMClient。
+        bus: 用于发布可观测性事件的 EventBus。
+        budget_guard: 用于步骤预算执行的 BudgetGuard。
+        loop_detector: 用于工具调用循环检测的 LoopDetector。
+        message_validator: 用于消息结构验证的 MessageValidator。
+        registry: 用于工具元数据查找和模式导出的 ToolRegistry。
+        executor: 用于实际工具执行的 ToolExecutor。
+        permission_guard: 用于危险命令确认的 PermissionGuard。
     """
 
     def __init__(
@@ -69,10 +67,10 @@ class ReActFSM:
         executor: ToolExecutor,
         permission_guard: PermissionGuard,
         *,
-        # Phase 3
+        # 第 3 阶段
         token_guard: TokenGuard | None = None,
         compressor: ContextCompressor | None = None,
-        # Phase 4 (new)
+        # Phase 4（新增）
         guard_pipeline: GuardPipeline | None = None,
         checkpoint_manager: CheckpointManager | None = None,
         circuit_breaker: CircuitBreaker | None = None,
@@ -97,22 +95,22 @@ class ReActFSM:
         self._exit_reason = "completed"
         self._last_act_failed = False
 
-        # Track recovery layers for Layer 2 (in-context retry)
-        self._layer2_retry_count: dict[str, int] = {}  # tool_call_id -> attempts
+        # 跟踪第 2 层恢复（上下文内重试）
+        self._layer2_retry_count: dict[str, int] = {}  # tool_call_id -> 尝试次数
         self._layer2_max_attempts = 2
 
     async def run(self, session: Session) -> Session:
-        """Execute the ReAct loop until FINISH or ERROR state.
+        """执行 ReAct 循环直到 FINISH 或 ERROR 状态。
 
-        The main loop dispatches to _handle_reason, _handle_act, or
-        _handle_observe based on session.state. Always publishes
-        SessionEnd before returning.
+        主循环根据 session.state 分发到 _handle_reason、
+        _handle_act 或 _handle_observe。总是在返回前
+        发布 SessionEnd。
 
         Args:
-            session: The Session object with initial messages and state=REASON.
+            session: 带有初始消息和 state=REASON 的 Session 对象。
 
         Returns:
-            The same Session object, now in FINISH or ERROR state.
+            相同的 Session 对象，现在处于 FINISH 或 ERROR 状态。
         """
         while session.state not in (AgentState.FINISH, AgentState.ERROR):
             prev_state = session.state
@@ -126,11 +124,11 @@ class ReActFSM:
                 session.state = AgentState.ERROR
                 self._exit_reason = "unknown_state"
 
-            # Checkpoint after every state transition (RES-01)
+            # 每次状态转换后创建检查点（RES-01）
             if self.checkpoint_manager is not None:
                 self.checkpoint_manager.save(session)
 
-        # Always publish SessionEnd before returning
+        # 返回前始终发布 SessionEnd
         await self.bus.publish(
             "session_end",
             {
@@ -144,17 +142,17 @@ class ReActFSM:
 
         return session
 
-    # ── State handlers ──────────────────────────────────────────────────
+    # ── 状态处理程序 ──────────────────────────────────────────────────
 
     async def _handle_reason(self, session: Session) -> None:
-        """Handle the REASON state: validate messages, check budget, call LLM.
+        """处理 REASON 状态：验证消息、检查预算、调用 LLM。
 
-        Transitions:
-        - content + no tool_calls -> FINISH (D-01)
-        - tool_calls -> ACT
-        - ValidationError -> ERROR
-        - Exception -> ERROR
-        - budget "final" action -> FINISH after LLM response
+        转换：
+        - 有内容 + 无 tool_calls → FINISH（D-01）
+        - 有 tool_calls → ACT
+        - ValidationError → ERROR
+        - Exception → ERROR
+        - 预算"final"操作 → LLM 响应后转 FINISH
         """
         step_num = session.step_count + 1
 
@@ -171,14 +169,14 @@ class ReActFSM:
         step_token_usage = None
 
         try:
-            # Guard: validate message structure before LLM call
+            # 守卫：LLM 调用前验证消息结构
             self.message_validator.validate(session.messages)
 
-            # Phase 4: GuardPipeline — sequential guard check (RES-04)
+            # Phase 4：GuardPipeline——顺序守卫检查（RES-04）
             if self.guard_pipeline is not None:
                 pipeline_result = self.guard_pipeline.check(session.messages)
                 if pipeline_result.action == "blocked":
-                    # Inject guard violation feedback into session
+                    # 将会话中注入守卫违规反馈
                     session.add_message(
                         "system",
                         content=(
@@ -186,7 +184,7 @@ class ReActFSM:
                             "请调整策略后重试。"
                         ),
                     )
-                    # Publish guard violation event
+                    # 发布守卫违规事件
                     await self.bus.publish(
                         "guard_violation",
                         {
@@ -197,11 +195,11 @@ class ReActFSM:
                             "detail": pipeline_result.detail or "",
                         },
                     )
-                    # Stay in REASON but injected system message constrains LLM
+                    # 保持 REASON 状态，但注入的系统消息约束了 LLM
                 elif pipeline_result.action == "compress" and self.compressor is not None:
-                    pass  # TokenGuard will trigger compression in Phase 3 code block
+                    pass  # TokenGuard 将在 Phase 3 代码块中触发压缩
 
-            # TokenGuard: check token budget before LLM call (Phase 3)
+            # TokenGuard：LLM 调用前检查 token 预算（Phase 3）
             if self.token_guard is not None:
                 tg_action, token_count, threshold_tokens = self.token_guard.check(session.messages)
                 if tg_action == "compress" and self.compressor is not None:
@@ -220,11 +218,11 @@ class ReActFSM:
                         session.messages, _summary_fn
                     )
                     if was_compressed:
-                        # Replace session messages with compressed version (append-only by reference)
+                        # 用压缩版本替换会话消息（通过引用进行追加式替换）
                         session.messages.clear()
                         session.messages.extend(compressed)
 
-                        # Publish context_compacted event
+                        # 发布 context_compacted 事件
                         await self.bus.publish(
                             "context_compacted",
                             {
@@ -239,16 +237,16 @@ class ReActFSM:
                             },
                         )
 
-            # Guard: budget check (may inject system messages)
+            # 守卫：预算检查（可能注入系统消息）
             should_continue, messages, action = self.budget_guard.check(
                 session.step_count, session.messages
             )
 
-            # Increment step count now (before LLM call) so SessionEnd reports correctly
+            # 在 LLM 调用前增加步骤计数（确保 SessionEnd 正确报告）
             session.increment_step()
 
-            # LLM call with (possibly modified) messages and registered tools
-            # Phase 4: Circuit breaker filtering — exclude OPEN tools from LLM schema
+            # LLM 调用，传入（可能已被修改的）消息和已注册的工具
+            # Phase 4：熔断器过滤——从 LLM 模式中排除 OPEN 状态工具
             open_tools: set[str] | None = None
             if self.circuit_breaker is not None:
                 open_tools = self.circuit_breaker.get_open_tools()
@@ -262,9 +260,9 @@ class ReActFSM:
 
             content = response.get("content", "")
             tool_calls: list[dict[str, Any]] = response.get("tool_calls", []) or []
-            step_token_usage = response.get("token_usage")  # captured from LLM stream
+            step_token_usage = response.get("token_usage")  # 从 LLM 流中捕获
 
-            # Build assistant message
+            # 构建 assistant 消息
             add_kwargs: dict[str, Any] = {"role": "assistant"}
             if content:
                 add_kwargs["content"] = content
@@ -275,9 +273,9 @@ class ReActFSM:
                 add_kwargs["reasoning_content"] = reasoning
             session.messages.append(add_kwargs)
 
-            # Determine next state
+            # 确定下一个状态
             if action == "final":
-                # Budget exhausted: allow this final response, then force FINISH
+                # 预算耗尽：允许这次最终响应，然后强制 FINISH
                 session.state = AgentState.FINISH
                 transition = "REASON_to_FINISH"
                 self._exit_reason = "budget_exhausted"
@@ -296,7 +294,7 @@ class ReActFSM:
                 session.state = AgentState.FINISH
                 transition = "REASON_to_FINISH"
 
-            # Handle budget warning
+            # 处理预算警告
             if action == "warn":
                 await self.bus.publish(
                     "budget_warning",
@@ -318,7 +316,7 @@ class ReActFSM:
             transition = "REASON_to_ERROR"
             self._exit_reason = "error"
 
-        # Publish StepEnd with token usage from LLM response
+        # 发布 StepEnd，附带 LLM 响应的 token 使用量
         await self.bus.publish(
             "step_end",
             {
@@ -331,19 +329,18 @@ class ReActFSM:
         )
 
     async def _handle_act(self, session: Session) -> None:
-        """Handle the ACT state: loop-detect, permission-check, execute tools.
+        """处理 ACT 状态：循环检测、权限检查、执行工具。
 
-        Phase 2 implementation — replaces the Phase 1 synthetic stub with
-        a full tool pipeline:
-        1. LoopGuard check (detect infinite loops)
-        2. Registry lookup (find tool metadata)
-        3. PermissionGuard check (confirm dangerous commands)
-        4. ToolExecutor.execute() (run the tool)
-        5. Publish tool_result event + inject result into session
+        Phase 2 实现——用完整的工具管道替换 Phase 1 的综合桩：
+        1. LoopGuard 检查（检测无限循环）
+        2. Registry 查找（查找工具元数据）
+        3. PermissionGuard 检查（确认危险命令）
+        4. ToolExecutor.execute()（运行工具）
+        5. 发布 tool_result 事件 + 将结果注入会话
 
-        Transitions:
-        - tool(s) processed -> OBSERVE
-        - force_exit from LoopDetector -> FINISH
+        转换：
+        - 工具处理完成 → OBSERVE
+        - LoopDetector 的 force_exit → FINISH
         """
         tool_calls_data = session.messages[-1].get("tool_calls", [])
         step_num = session.step_count
@@ -354,7 +351,7 @@ class ReActFSM:
             tool_name = func.get("name", tc.get("name", "unknown"))
             tool_call_id = tc.get("id", "") or tc.get("tool_call_id", "")
 
-            # Resolve arguments: function.arguments is a JSON string per OpenAI spec
+            # 解析参数：function.arguments 按 OpenAI 规范是 JSON 字符串
             raw_args = func.get("arguments", tc.get("arguments", {}))
             if isinstance(raw_args, str):
                 try:
@@ -362,12 +359,12 @@ class ReActFSM:
                 except _json.JSONDecodeError:
                     raw_args = {}
 
-            # Guard: loop detection (Phase 4 — enhanced 3-tuple return)
+            # 守卫：循环检测（Phase 4——增强的 3 元组返回）
             should_proceed, loop_action, _loop_class = self.loop_detector.check(
                 tool_name, raw_args
             )
 
-            # Publish loop_detected warning event
+            # 发布 loop_detected 警告事件
             if loop_action == "warn":
                 await self.bus.publish(
                     "loop_detected",
@@ -386,7 +383,7 @@ class ReActFSM:
                     self._exit_reason = "loop_detected"
                     return
 
-                # block: inject system message, treat as failure
+                # block：注入系统消息，视为失败
                 session.add_message(
                     "tool",
                     content=(
@@ -399,9 +396,9 @@ class ReActFSM:
                 any_blocked = True
                 continue
 
-            # ── Phase 2: Real tool pipeline ──────────────────────────
+            # ── Phase 2：真实工具管道 ──────────────────────────────
 
-            # Phase 4: FailureRegistry check (RES-03)
+            # Phase 4：FailureRegistry 检查（RES-03）
             if self.failure_registry is not None:
                 sig = self.loop_detector._signature(
                     tool_name, raw_args if isinstance(raw_args, dict) else {}
@@ -418,7 +415,7 @@ class ReActFSM:
                     any_blocked = True
                     continue
 
-            # Phase 4: CircuitBreaker check (RES-06)
+            # Phase 4：CircuitBreaker 检查（RES-06）
             if self.circuit_breaker is not None:
                 allowed, cb_state = self.circuit_breaker.check(tool_name)
                 if not allowed:
@@ -433,7 +430,7 @@ class ReActFSM:
                     any_blocked = True
                     continue
 
-            # Step 1: Look up tool in registry
+            # 第 1 步：在注册表中查找工具
             metadata = self.registry.get(tool_name)
             if metadata is None:
                 session.add_message(
@@ -444,7 +441,7 @@ class ReActFSM:
                 any_blocked = True
                 continue
 
-            # Step 2: Permission check (D-09)
+            # 第 2 步：权限检查（D-09）
             perm_result, perm_action = await self.permission_guard.check(
                 tool_name,
                 raw_args,
@@ -455,7 +452,7 @@ class ReActFSM:
             )
 
             if not perm_result:
-                # User denied or confirmation timed out
+                # 用户拒绝或确认超时
                 if perm_action == "user_denied":
                     session.add_message(
                         "tool",
@@ -477,17 +474,17 @@ class ReActFSM:
                 any_blocked = True
                 continue
 
-            # Step 3: Execute the tool via ToolExecutor
+            # 第 3 步：通过 ToolExecutor 执行工具
             result = await self.executor.execute(tool_name, raw_args)
 
-            # Phase 4: CircuitBreaker record (RES-06)
+            # Phase 4：CircuitBreaker 记录（RES-06）
             if self.circuit_breaker is not None:
                 await self.circuit_breaker.record_with_session(
                     tool_name, success=not result.is_error,
                     session_id=session.session_id, bus=self.bus,
                 )
 
-            # Phase 4: FailureRegistry record on non-transient errors (RES-03)
+            # Phase 4：FailureRegistry 记录非瞬态错误（RES-03）
             if self.failure_registry is not None and result.is_error:
                 sig = self.loop_detector._signature(
                     tool_name, raw_args if isinstance(raw_args, dict) else {}
@@ -497,11 +494,11 @@ class ReActFSM:
                     result.error_message or "Unknown error",
                 )
 
-            # Phase 4: RateLimitGuard record (RES-04)
+            # Phase 4：RateLimitGuard 记录（RES-04）
             if self.rate_limit_guard is not None and not result.is_error:
                 self.rate_limit_guard.record_call(tool_name)
 
-            # Step 4: Publish ToolResult event
+            # 第 4 步：发布 ToolResult 事件
             await self.bus.publish(
                 "tool_result",
                 {
@@ -516,9 +513,9 @@ class ReActFSM:
                 },
             )
 
-            # Step 5: Inject tool_result into session messages with overflow support (Phase 3, D-05)
+            # 第 5 步：将 tool_result 注入会话消息，支持溢出文件（Phase 3, D-05）
             if result.overflow_file and result.data is not None:
-                # Calculate size for the reference
+                # 计算引用的大小
                 data_str = str(result.data)
                 size_kb = len(data_str.encode("utf-8")) // 1024
                 tool_content = (
@@ -538,7 +535,7 @@ class ReActFSM:
                 tool_call_id=tool_call_id,
             )
 
-            # Publish overflow_written event
+            # 发布 overflow_written 事件
             if result.overflow_file:
                 data_str = str(result.data) if result.data else ""
                 size_kb = len(data_str.encode("utf-8")) // 1024
@@ -558,20 +555,20 @@ class ReActFSM:
             if result.is_error:
                 any_blocked = True
 
-        # Track whether any tool failed (for unreachable detection)
+        # 追踪是否有工具失败（用于不可达检测）
         self._last_act_failed = any_blocked
         session.state = AgentState.OBSERVE
 
     async def _handle_observe(self, session: Session) -> None:
-        """Handle the OBSERVE state: increment step, check unreachable.
+        """处理 OBSERVE 状态：增加步数，检查不可达。
 
-        Transitions:
-        - step_count < max and not unreachable -> REASON
-        - unreachable detected (3+ consecutive failures) -> FINISH
+        转换：
+        - step_count < max 且非不可达 → REASON
+        - 检测到不可达（连续 3+ 次失败）→ FINISH
         """
-        # Check unreachable detection via BudgetGuard
+        # 通过 BudgetGuard 检查不可达检测
         unreachable = self.budget_guard.check_unreachable(self._last_act_failed)
-        self._last_act_failed = False  # Reset for next cycle
+        self._last_act_failed = False  # 为下一个循环重置
 
         if unreachable == "unreachable":
             session.state = AgentState.FINISH
