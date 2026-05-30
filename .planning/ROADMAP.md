@@ -95,8 +95,8 @@
 - [x] 05-02-PLAN.md -- Session REST + Agent Control API：会话 CRUD、启动/确认端点、组件工厂提取、集成测试
 - [x] 05-03-PLAN.md -- Frontend Scaffold：Vite 项目 + 依赖安装 + shadcn/ui 初始化
 - [x] 05-04-PLAN.md -- Frontend Layout + Data Pipeline：三面板布局、TypeScript 事件类型、useSSE hook、Zustand stores
-- [ ] 05-05-PLAN.md -- Agent Timeline + Session List：SessionList 组件、AgentTimeline+StepCard、ConnectionStatus、键盘导航
-- [ ] 05-06-PLAN.md -- Tool Detail + Token/Cost + Confirmation：ToolDetail、TokenUsageCard+recharts、ConfirmationDialog（D-06）
+- [x] 05-05-PLAN.md -- Agent Timeline + Session List：SessionList 组件、AgentTimeline+StepCard、ConnectionStatus、键盘导航
+- [x] 05-06-PLAN.md -- Tool Detail + Token/Cost + Confirmation：ToolDetail、TokenUsageCard+recharts、ConfirmationDialog（D-06）
 - [ ] 05-07-PLAN.md -- End-to-End Integration + Production：Start Agent 串联、StaticFiles 生产模式、BIZ-02 端到端验证
 
 ## 进度
@@ -107,4 +107,4 @@
 | 2. 工具系统与业务验证 | 4/4 | 完成 | - |
 | 3. 上下文管理 | 3/3 | 完成 | 2026-05-28 |
 | 4. 韧性与恢复 | 0/3 | 进行中 | - |
-| 5. 可观测性与 Web 前端 | 0/0 | 未开始 | - |
+| 5. 可观测性与 Web 前端 | 6/7 | 进行中 | - |
