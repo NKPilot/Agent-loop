@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from typing import Any
 
 from loopai.agents.types import AgentMetadata, AgentToolResult
 from loopai.config import AgentConfig
 from loopai.events.bus import EventBus
+from loopai.events.schemas import AgentCallEnd, AgentCallStart
 from loopai.llm.client import LLMClient
 from loopai.session.context import AgentState, Session
 from loopai.state_machine.fsm import ReActFSM
@@ -99,23 +101,30 @@ class AgentTool:
         Returns:
             序列化为 JSON 字符串的 AgentToolResult。
         """
-        result = await self._run_sub_agent(kwargs)
+        call_id = str(uuid.uuid4())[:8]
+        result = await self._run_sub_agent(kwargs, call_id)
         return result.model_dump_json()
 
     # ── 子 Agent 执行 ──────────────────────────────────────────────
 
-    async def _run_sub_agent(self, args: dict[str, Any]) -> AgentToolResult:
+    async def _run_sub_agent(
+        self, args: dict[str, Any], call_id: str
+    ) -> AgentToolResult:
         """运行子 Agent 的完整生命周期。
 
         内部流程（D-01, D-03, D-04）：
-        1. 创建独立 EventBus（子 Agent 不污染主 EventBus）
-        2. 创建独立 Session，system prompt = agent_meta.system_prompt
-        3. 创建独立 ToolRegistry，复用 agent_meta.tool_registry
-        4. 创建 ToolExecutor + 必要 guards
-        5. 创建 LLMClient（复用主 Agent 的 config）
-        6. 创建 ReActFSM 并运行
-        7. 收集结果 → 构建 AgentToolResult
+        1. 发布 AgentCallStart 到主 EventBus（前端可视化管线）
+        2. 创建独立 EventBus（子 Agent 不污染主 EventBus）
+        3. 创建独立 Session，system prompt = agent_meta.system_prompt
+        4. 创建独立 ToolRegistry，复用 agent_meta.tool_registry
+        5. 创建 ToolExecutor + 必要 guards
+        6. 创建 LLMClient（复用主 Agent 的 config）
+        7. 创建 ReActFSM 并运行
+        8. 收集结果 → 构建 AgentToolResult
+        9. 发布 AgentCallEnd 到主 EventBus
         """
+        agent_name = self._agent_meta.name
+
         # 1. 创建独立 EventBus
         sub_bus = EventBus()
 
@@ -126,6 +135,16 @@ class AgentTool:
         # 将主 Agent 传入的参数转换为 user 消息
         args_content = json.dumps(args, ensure_ascii=False, indent=2)
         session.add_message("user", content=args_content)
+
+        # 发布子 Agent 调用开始事件到主 EventBus
+        if self._bus is not None:
+            self._bus.publish(AgentCallStart(
+                session_id=session.session_id,
+                step_num=0,
+                agent_name=agent_name,
+                child_session_id=session.session_id,
+                tool_call_id=call_id,
+            ))
 
         # 3. 创建 ToolRegistry（复用 agent_meta 中的注册表）
         registry: ToolRegistry
@@ -165,16 +184,44 @@ class AgentTool:
                 fsm.run(session), timeout=self._agent_meta.timeout
             )
         except asyncio.TimeoutError:
-            return AgentToolResult(
-                summary=f"子 Agent '{self._agent_meta.name}' 执行超时 "
+            result = AgentToolResult(
+                summary=f"子 Agent '{agent_name}' 执行超时 "
                         f"（{self._agent_meta.timeout}s）",
                 steps=session.step_count,
                 session_id=session.session_id,
                 success=False,
             )
+            if self._bus is not None:
+                self._bus.publish(AgentCallEnd(
+                    session_id=session.session_id,
+                    step_num=0,
+                    agent_name=agent_name,
+                    child_session_id=session.session_id,
+                    summary=result.summary,
+                    tool_calls_count=0,
+                    steps=result.steps,
+                    success=False,
+                ))
+            return result
 
         # 7. 收集结果 → 构建 AgentToolResult
-        return self._extract_summary(session)
+        result = self._extract_summary(session)
+
+        # 发布子 Agent 调用完成事件到主 EventBus
+        if self._bus is not None:
+            self._bus.publish(AgentCallEnd(
+                session_id=session.session_id,
+                step_num=0,
+                agent_name=agent_name,
+                child_session_id=session.session_id,
+                summary=result.summary,
+                tool_calls_count=len(result.tool_calls),
+                token_usage=result.token_usage,
+                steps=result.steps,
+                success=result.success,
+            ))
+
+        return result
 
     # ── 结果摘要提取 ───────────────────────────────────────────────
 
