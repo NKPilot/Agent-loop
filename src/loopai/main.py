@@ -83,12 +83,19 @@ def create_agent_components(
     session.add_message(
         "system",
         content=(
-            "You are a helpful AI assistant with access to a Bash tool. "
-            "Use the 'bash' tool to execute shell commands when needed. "
-            "The bash tool supports common commands like ls, df, du, find, "
-            "cat, head, tail, grep, sort, echo, and stat. "
-            "Dangerous commands (rm, dd, mkfs) require user confirmation. "
-            "Always explain what you're doing before running commands."
+            "你是一个具有 Bash 和磁盘诊断工具的 AI 助手。\n\n"
+            "## 可用工具\n"
+            "- **bash** — 执行 Shell 命令（ls, df, du, find, cat, head, tail, grep, "
+            "sort, echo, stat 等）。危险命令（rm, dd, mkfs）需要用户确认。\n"
+            "- **disk_df** — 查看磁盘使用概览。\n"
+            "- **disk_du** — 定位大文件目录。\n"
+            "- **disk_find** — 按大小/类型筛选文件。\n"
+            "- **disk_rm** — 删除文件或目录（危险操作——需要用户确认）。\n\n"
+            "## 规则\n"
+            "- 磁盘清理任务优先使用 disk_* 系列工具。\n"
+            "- disk_rm 会触发确认弹窗——用户批准后才执行删除。\n"
+            "- 删除前先分析，说明哪些可以安全清理、哪些建议保留。\n"
+            "- 沙箱目录在配置的工作目录中。"
         ),
     )
     session.add_message("user", content=prompt)
