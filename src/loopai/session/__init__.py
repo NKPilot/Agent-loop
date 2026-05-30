@@ -1,6 +1,6 @@
-"""Session module providing the AgentState enum and Session data class.
+"""Session 模块，提供 AgentState 枚举和 Session 数据类。
 
-Session is the canonical state container that the FSM (Plan 05)
-operates on. It holds the conversation messages, step counter,
-tool call history, and current agent state.
+Session 是 FSM（Plan 05）操作的规范状态容器。
+它持有对话消息、步骤计数器、工具调用历史和
+当前 Agent 状态。
 """

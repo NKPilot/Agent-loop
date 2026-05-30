@@ -1,26 +1,25 @@
-""":mod:`loopai.tools.executor` — Tool execution pipeline with retry and error handling.
+""":mod:`loopai.tools.executor` — 带重试和错误处理的工具执行管道。
 
-The :class:`ToolExecutor` is the runtime engine for tool calls.  It implements
-a complete execution pipeline:
+:class:`ToolExecutor` 是工具调用的运行时引擎。它实现了完整的执行管道：
 
-    1. Look up tool metadata from the :class:`ToolRegistry`
-    2. Validate arguments against the tool's Pydantic model (D-02, D-05)
-    3. Execute the tool with a configurable timeout (D-07)
-    4. Classify any exceptions via :func:`~loopai.tools.errors.classify_error`
-    5. Retry on transient errors with exponential backoff (D-12, D-13)
-    6. Wrap the outcome in a standardized :class:`ToolResult`
+    1. 从 :class:`ToolRegistry` 查找工具元数据
+    2. 根据工具的 Pydantic 模型验证参数（D-02, D-05）
+    3. 使用可配置超时执行工具（D-07）
+    4. 通过 :func:`~loopai.tools.errors.classify_error` 分类异常
+    5. 对瞬态错误使用指数退避重试（D-12, D-13）
+    6. 将结果包装为标准的 :class:`ToolResult`
 
-Sync functions are executed in the default thread pool via
-:func:`asyncio.to_thread` (D-06).  Async functions are awaited directly.
+同步函数通过 :func:`asyncio.to_thread` 在默认线程池中执行（D-06）。
+异步函数直接 await。
 
-Decision references:
-    D-02: Pydantic-based argument validation
-    D-05: Standardized ToolResult wrapping
-    D-06: sync/async dual execution strategy
-    D-07: Per-tool timeout with ``asyncio.wait_for``
-    D-11: Exception-to-ErrorCategory mapping
-    D-12: Configurable retry with exponential backoff + jitter
-    D-13: Only TRANSIENT errors trigger auto-retry
+决策引用:
+    D-02: 基于 Pydantic 的参数验证
+    D-05: 标准化 ToolResult 包装
+    D-06: 同步/异步双执行策略
+    D-07: 使用 ``asyncio.wait_for`` 的每工具超时
+    D-11: 异常到 ErrorCategory 映射
+    D-12: 可配置重试，指数退避 + 抖动
+    D-13: 仅 TRANSIENT 错误触发自动重试
 """
 
 from __future__ import annotations
@@ -46,17 +45,17 @@ from loopai.tools.types import (
     ToolResult,
 )
 
-# Overflow threshold for tool output (80K characters)
+# 工具输出的溢出阈值（80K 字符）
 _OVERFLOW_THRESHOLD_CHARS = 80 * 1024
-# Directory for overflow files
+# 溢出文件目录
 _OVERFLOW_DIR = ".sandbox/overflow"
 
 
 class ToolExecutor:
-    """Execute tool calls through a validated, timeout-controlled pipeline.
+    """通过验证的、带超时控制的管道执行工具调用。
 
     Args:
-        registry: The :class:`ToolRegistry` to look up tools from.
+        registry: 用于查找工具的 :class:`ToolRegistry`。
 
     Example::
 
@@ -74,27 +73,26 @@ class ToolExecutor:
         self._registry = registry
         self._recovery_cfg = recovery_config or RecoveryConfig()
 
-    # ── Public API ──────────────────────────────────────────────────
+    # ── 公共 API ──────────────────────────────────────────────────
 
     async def execute(self, tool_name: str, args: dict,
                       session_id: str = "", tool_call_id: str = "") -> ToolResult:
-        """Execute a tool by name with the given arguments.
+        """按名称执行给定参数的工具。
 
-        This is the main entry point.  It handles metadata lookup, argument
-        validation, execution, and result wrapping.  Retry decisions are
-        delegated to :meth:`_execute_with_retry`.
+        这是主入口点。处理元数据查找、参数验证、执行和结果包装。
+        重试决策委托给 :meth:`_execute_with_retry`。
 
         Args:
-            tool_name: Full tool name (e.g. ``"bash.df"``).
-            args: Raw argument dict from the LLM (untrusted boundary).
-            session_id: Session identifier for overflow file naming.
-            tool_call_id: Tool call identifier for overflow file naming.
+            tool_name: 完整工具名称（例如 ``"bash.df"``）。
+            args: 来自 LLM 的原始参数字典（非信任边界）。
+            session_id: 用于溢出文件命名的会话标识符。
+            tool_call_id: 用于溢出文件命名的工具调用标识符。
 
         Returns:
-            A :class:`ToolResult` with success/error status and timing info.
+            包含成功/错误状态和计时信息的 :class:`ToolResult`。
 
         Raises:
-            KeyError: If *tool_name* is not found in the registry.
+            KeyError: 如果在注册表中未找到 *tool_name*。
         """
         metadata = self._registry.get(tool_name)
         if metadata is None:
@@ -103,7 +101,7 @@ class ToolExecutor:
                 duration_ms=0.0,
             )
 
-        # Step 1: Validate arguments via the tool's Pydantic model (D-02)
+        # 第 1 步：通过工具的 Pydantic 模型验证参数（D-02）
         valid_model = metadata.validation_model
         if valid_model is not None:
             try:
@@ -117,26 +115,26 @@ class ToolExecutor:
         else:
             validated_args = dict(args)
 
-        # Step 2: Execute with recovery (D-12, D-13, D-04)
+        # 第 2 步：带恢复策略执行（D-12, D-13, D-04）
         return await self._execute_with_recovery(metadata, validated_args,
                                                   session_id, tool_call_id)
 
-    # ── Retry loop ──────────────────────────────────────────────────
+    # ── 重试循环 ──────────────────────────────────────────────────
 
     async def _execute_with_retry(
         self, metadata: ToolMetadata, validated_args: dict,
         session_id: str = "", tool_call_id: str = "",
     ) -> ToolResult:
-        """Execute the tool with retry on transient errors.
+        """在瞬态错误上带重试执行工具。
 
         Args:
-            metadata: Tool metadata (contains retry config).
-            validated_args: Arguments that have passed Pydantic validation.
-            session_id: Session identifier for overflow file naming.
-            tool_call_id: Tool call identifier for overflow file naming.
+            metadata: 工具元数据（包含重试配置）。
+            validated_args: 已通过 Pydantic 验证的参数。
+            session_id: 用于溢出文件命名的会话标识符。
+            tool_call_id: 用于溢出文件命名的工具调用标识符。
 
         Returns:
-            A :class:`ToolResult` for the final outcome.
+            最终结果的 :class:`ToolResult`。
         """
         last_result: ToolResult | None = None
         retry_config = metadata.retry
@@ -145,17 +143,17 @@ class ToolExecutor:
             try:
                 result = await self._execute_once(metadata, validated_args,
                                                    session_id, tool_call_id)
-                # Success — return immediately
+                # 成功——立即返回
                 return result
             except Exception as exc:
                 category = classify_error(exc)
 
                 if category == ErrorCategory.FATAL:
-                    # D-13: Fatal errors re-raise directly to terminate session
+                    # D-13: 致命错误直接重新抛出以终止会话
                     raise
 
                 if category == ErrorCategory.TRANSIENT:
-                    # D-13: Transient errors — retry with backoff
+                    # D-13: 瞬态错误——带退避重试
                     msg = (
                         f"Transient error "
                         f"(attempt {attempt + 1}/{retry_config.max_attempts}): {exc}"
@@ -164,19 +162,19 @@ class ToolExecutor:
                         error_msg=msg,
                         duration_ms=0.0,
                     )
-                    # Don't sleep on the last attempt
+                    # 最后一次尝试不睡眠
                     if attempt < retry_config.max_attempts - 1:
                         delay = retry_config.compute_delay(attempt)
                         await asyncio.sleep(delay)
                     continue
 
-                # TOOL_EXECUTION or GUARD_VIOLATION — no retry
+                # TOOL_EXECUTION 或 GUARD_VIOLATION——不重试
                 return ToolResult.error(
                     error_msg=f"{category.value}: {exc}",
                     duration_ms=0.0,
                 )
 
-        # Exhausted all retry attempts
+        # 所有重试尝试已耗尽
         if last_result is not None:
             return last_result
         return ToolResult.error(
@@ -184,52 +182,52 @@ class ToolExecutor:
             duration_ms=0.0,
         )
 
-    # ── 4-layer recovery pipeline ───────────────────────────────────
+    # ── 4 层恢复管道 ─────────────────────────────────────────────
 
     async def _execute_with_recovery(
         self, metadata: ToolMetadata, validated_args: dict,
         session_id: str = "", tool_call_id: str = "",
     ) -> ToolResult:
-        """Execute tool with 4-layer recovery escalation (D-03, D-04).
+        """以 4 层恢复升级策略执行工具（D-03, D-04）。
 
-        Layer 1 — Cosmetic repair: fix JSON formatting errors in arguments.
-        Layer 2 — In-context: handled at FSM level (structured error -> LLM re-call).
-        Layer 3 — Backoff: existing exponential backoff + jitter from RetryConfig.
-        Layer 4 — Human escalation: publish event, return error result.
+        第 1 层——外观修复：修复参数中的 JSON 格式错误。
+        第 2 层——上下文内：在 FSM 级别处理（结构化错误 → LLM 重新调用）。
+        第 3 层——退避：来自 RetryConfig 的现有指数退避 + 抖动。
+        第 4 层——人工升级：发布事件，返回错误结果。
         """
-        # ── Layer 1: Cosmetic repair ──────────────────────────────────
+        # ── 第 1 层：外观修复 ────────────────────────────────────
         for attempt in range(self._recovery_cfg.cosmetic_max_attempts):
             try:
                 result = await self._execute_once(metadata, validated_args,
                                                    session_id, tool_call_id)
-                return result  # Success -> return immediately
+                return result  # 成功 → 立即返回
             except (json.JSONDecodeError, TypeError) as exc:
-                # Attempt cosmetic repair on first attempt
+                # 在首次尝试时尝试外观修复
                 if attempt == 0:
                     repaired = self._cosmetic_repair(validated_args, exc)
                     if repaired is not None:
                         validated_args = repaired
                         continue
-                # Cannot repair -> escalate
+                # 无法修复 → 升级
                 return ToolResult.error(
                     error_msg=f"Layer 1 (cosmetic) exhausted: {exc}",
                     duration_ms=0.0,
                 )
             except (TimeoutError, ConnectionError, asyncio.TimeoutError):
-                # Network/timeout issues -> not cosmetic, fall through to Layer 3
+                # 网络/超时问题 → 非外观问题，落入第 3 层
                 break
             except Exception as exc:
-                # Other exceptions -> check category
+                # 其他异常 → 检查类别
                 cat = classify_error(exc)
                 if cat == ErrorCategory.TRANSIENT:
-                    break  # Fall through to Layer 3
-                # TOOL_EXECUTION or GUARD_VIOLATION -> return error
+                    break  # 落入第 3 层
+                # TOOL_EXECUTION 或 GUARD_VIOLATION → 返回错误
                 return ToolResult.error(
                     error_msg=f"{cat.value}: {exc}",
                     duration_ms=0.0,
                 )
 
-        # ── Layer 3: Full retry + backoff (existing logic) ────────────
+        # ── 第 3 层：完整重试 + 退避（现有逻辑）──────────────
         last_result: ToolResult | None = None
         retry_config = metadata.retry
 
@@ -237,12 +235,12 @@ class ToolExecutor:
             try:
                 result = await self._execute_once(metadata, validated_args,
                                                    session_id, tool_call_id)
-                return result  # Success
+                return result  # 成功
             except Exception as exc:
                 category = classify_error(exc)
 
                 if category == ErrorCategory.FATAL:
-                    raise  # Fatal -> terminate session
+                    raise  # 致命 → 终止会话
 
                 if category == ErrorCategory.TRANSIENT:
                     msg = (f"Transient error "
@@ -253,13 +251,13 @@ class ToolExecutor:
                         await asyncio.sleep(delay)
                     continue
 
-                # TOOL_EXECUTION or GUARD_VIOLATION -> no retry
+                # TOOL_EXECUTION 或 GUARD_VIOLATION → 不重试
                 return ToolResult.error(
                     error_msg=f"{category.value}: {exc}",
                     duration_ms=0.0,
                 )
 
-        # Layer 3 exhausted or last_result set from transient retries
+        # 第 3 层耗尽或 last_result 从瞬态重试中设置
         if last_result is not None:
             result_for_layer4 = last_result
         else:
@@ -268,38 +266,38 @@ class ToolExecutor:
                 duration_ms=0.0,
             )
 
-        # ── Layer 4: Human escalation ─────────────────────────────────
-        return result_for_layer4  # FSM layer handles escalation
+        # ── 第 4 层：人工升级 ───────────────────────────────────
+        return result_for_layer4  # FSM 层处理升级
 
-    # ── Cosmetic repair ──────────────────────────────────────────────
+    # ── 外观修复 ─────────────────────────────────────────────────
 
     def _cosmetic_repair(
         self, validated_args: dict, exception: Exception
     ) -> dict | None:
-        """Attempt cosmetic repair of tool arguments based on the exception type.
+        """根据异常类型尝试对工具参数进行外观修复。
 
-        Current repairs:
-        - TypeError: Check for common type mismatches and coerce
+        当前修复：
+        - TypeError: 检查常见类型不匹配并强制转换
 
         Args:
-            validated_args: The current argument dict.
-            exception: The exception that was raised.
+            validated_args: 当前参数字典。
+            exception: 被抛出的异常。
 
         Returns:
-            Repaired argument dict, or None if repair not possible.
+            修复后的参数字典，或 None 表示无法修复。
         """
-        # TypeError: try numeric string -> number coercion
+        # TypeError: 尝试数字字符串 → 数字强制转换
         if isinstance(exception, TypeError):
             repaired = dict(validated_args)
             for key, value in repaired.items():
                 if isinstance(value, str):
-                    # Try int conversion
+                    # 尝试 int 转换
                     try:
                         repaired[key] = int(value)
                         continue
                     except (ValueError, TypeError):
                         pass
-                    # Try float conversion
+                    # 尝试 float 转换
                     try:
                         repaired[key] = float(value)
                         continue
@@ -310,26 +308,26 @@ class ToolExecutor:
 
         return None
 
-    # ── Single execution attempt ────────────────────────────────────
+    # ── 单次执行尝试 ────────────────────────────────────────────
 
     async def _execute_once(
         self, metadata: ToolMetadata, validated_args: dict,
         session_id: str = "", tool_call_id: str = "",
     ) -> ToolResult:
-        """Execute the tool function once with timeout and result wrapping.
+        """使用超时和结果包装执行一次工具函数。
 
         Args:
-            metadata: Tool metadata (contains timeout, func_ref).
-            validated_args: Validated argument dict.
-            session_id: Session identifier for overflow file naming.
-            tool_call_id: Tool call identifier for overflow file naming.
+            metadata: 工具元数据（包含 timeout、func_ref）。
+            validated_args: 已验证的参数字典。
+            session_id: 用于溢出文件命名的会话标识符。
+            tool_call_id: 用于溢出文件命名的工具调用标识符。
 
         Returns:
-            A :class:`ToolResult` for this single attempt.
+            此次单次尝试的 :class:`ToolResult`。
 
         Raises:
-            Exception: Any exception raised by the tool function (caught by
-                the retry loop in :meth:`_execute_with_retry`).
+            Exception: 工具函数抛出的任何异常（由
+                :meth:`_execute_with_retry` 中的重试循环捕获）。
         """
         func = metadata.func_ref
         if func is None:
@@ -341,18 +339,18 @@ class ToolExecutor:
         timeout = metadata.timeout
         start = time.monotonic()
 
-        # Determine execution strategy: async → await, sync → thread pool (D-06)
+        # 确定执行策略：异步 → await，同步 → 线程池（D-06）
         if inspect.iscoroutinefunction(func):
             coro = func(**validated_args)
         else:
             coro = asyncio.to_thread(func, **validated_args)
 
-        # Apply timeout (D-07)
+        # 应用超时（D-07）
         try:
             raw_result = await asyncio.wait_for(coro, timeout=timeout)
         except TimeoutError:
-            # asyncio.TimeoutError is a TRANSIENT category — re-raise
-            # so the retry loop can handle it
+            # asyncio.TimeoutError 是 TRANSIENT 类别——重新抛出
+            # 以便重试循环可以处理
             duration_ms = (time.monotonic() - start) * 1000
             raise TimeoutError(
                 f"Tool '{metadata.name}' timed out after {timeout}s"
@@ -360,7 +358,7 @@ class ToolExecutor:
 
         duration_ms = (time.monotonic() - start) * 1000
 
-        # Write overflow file for large string results (> 80K characters)
+        # 为大型字符串结果（> 80K 字符）写入溢出文件
         truncated = False
         overflow_file: str | None = None
         data: Any = raw_result
@@ -369,7 +367,7 @@ class ToolExecutor:
             overflow_file = self._write_overflow_file(
                 metadata.name, session_id, tool_call_id, data
             )
-            # data 保持完整 — FSM._handle_act 负责在注入上下文时替换为引用
+            # data 保持完整——FSM._handle_act 负责在注入上下文时替换为引用
 
         return ToolResult.success(
             data=data,
@@ -378,24 +376,24 @@ class ToolExecutor:
             overflow_file=overflow_file,
         )
 
-    # ── Overflow file writing ─────────────────────────────────────────
+    # ── 溢出文件写入 ─────────────────────────────────────────────
 
     def _write_overflow_file(
         self, tool_name: str, session_id: str, tool_call_id: str, content: str
     ) -> str:
-        """Write tool output to an overflow file when it exceeds the threshold.
+        """当工具输出超过阈值时将其写入溢出文件。
 
-        File path format: ``.sandbox/overflow/{session_id}_{tool_call_id}_{timestamp}.txt``
-        If ``session_id`` is empty, the file path falls back to ``{timestamp}.txt``.
+        文件路径格式：``.sandbox/overflow/{session_id}_{tool_call_id}_{timestamp}.txt``
+        如果 ``session_id`` 为空，文件路径回退为 ``{timestamp}.txt``。
 
         Args:
-            tool_name: Name of the tool (currently unused in the path).
-            session_id: Session identifier for the file name.
-            tool_call_id: Tool call identifier for the file name.
-            content: The full tool output string to write.
+            tool_name: 工具名称（当前未在路径中使用）。
+            session_id: 文件名的会话标识符。
+            tool_call_id: 文件名的工具调用标识符。
+            content: 要写入的完整工具输出字符串。
 
         Returns:
-            The absolute path string to the written overflow file.
+            已写入溢出文件的绝对路径字符串。
         """
         os.makedirs(_OVERFLOW_DIR, exist_ok=True)
 

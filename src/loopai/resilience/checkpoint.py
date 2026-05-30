@@ -1,9 +1,9 @@
-"""JSONL incremental checkpoint manager for session state persistence.
+"""会话状态持久化的 JSONL 增量检查点管理器。
 
-Provides crash recovery by appending a serialised Session state as a
-single JSON line after every FSM step.  Recovery reads the last line.
-Follows the same log_dir pattern and file permissions as JSONLLogger
-(D-02: colocated, linked by session_id).
+提供崩溃恢复能力，在每次 FSM 步骤后将序列化的 Session 状态
+追加为单行 JSON。恢复时读取最后一行。
+遵循与 JSONLLogger 相同的 log_dir 模式和文件权限
+（D-02：同目录存放，通过 session_id 关联）。
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ if TYPE_CHECKING:
 
 
 class CheckpointManager:
-    """Append-only JSONL checkpoint writer with crash recovery.
+    """追加式 JSONL 检查点写入器，支持崩溃恢复。
 
-    Checkpoint files live in ``logs/sessions/`` alongside JSONL event
-    logs, differentiated by ``.ckpt.jsonl`` suffix (D-02).
+    检查点文件存放在 ``logs/sessions/`` 中，与 JSONL 事件
+    日志并列，通过 ``.ckpt.jsonl`` 后缀区分（D-02）。
 
-    File permissions match JSONLLogger: 0o700 directory, 0o600 file.
+    文件权限与 JSONLLogger 一致：目录 0o700，文件 0o600。
     """
 
     def __init__(self, session_id: str, log_dir: str = "logs/sessions") -> None:
@@ -40,17 +40,16 @@ class CheckpointManager:
         self._file = open(self.filepath, "a", encoding="utf-8")
         os.chmod(self._file.fileno(), stat.S_IRUSR | stat.S_IWUSR)  # 0o600
 
-    # ── Public API ──────────────────────────────────────────────────
+    # ── 公共 API ──────────────────────────────────────────────────
 
     def save(self, session: "Session") -> dict:
-        """Serialize *session* state as one JSON line and flush.
+        """将 *session* 状态序列化为单行 JSON 并刷新。
 
-        Only a whitelist of fields is serialised.  The ``config`` field
-        is **excluded** because it contains a ``SecretStr`` API key that
-        must never be written to disk.
+        只有白名单字段被序列化。``config`` 字段被**排除**，
+        因为它包含绝不可写入磁盘的 ``SecretStr`` API 密钥。
 
-        Returns the written state dict so the caller can publish a
-        ``checkpoint_saved`` event.
+        返回已写入的状态字典，以便调用方发布
+        ``checkpoint_saved`` 事件。
         """
         state: dict = {
             "session_id": session.session_id,
@@ -70,15 +69,15 @@ class CheckpointManager:
     def recover(
         cls, session_id: str, log_dir: str = "logs/sessions"
     ) -> "Session | None":
-        """Recover the most recent checkpoint for *session_id*.
+        """恢复 *session_id* 的最新检查点。
 
-        Searches ``logs/sessions/`` for files ending with
-        ``_{session_id}.ckpt.jsonl``, picks the last (by name) and reads
-        the last JSONL line.
+        在 ``logs/sessions/`` 中搜索以 ``_{session_id}.ckpt.jsonl``
+        结尾的文件，选取最后一个（按名称排序）并读取
+        最后一行 JSONL。
 
         Returns:
-            A reconstructed :class:`Session` (with ``config=None``), or
-            ``None`` if no checkpoint file exists or the file is empty.
+            重建的 :class:`Session`（``config=None``），
+            如果检查点文件不存在或文件为空则返回 ``None``。
         """
         from loopai.session.context import AgentState, Session
 
@@ -91,7 +90,7 @@ class CheckpointManager:
         if not candidates:
             return None
 
-        ckpt_file = candidates[-1]  # most recent by filename sort
+        ckpt_file = candidates[-1]  # 按文件名排序取最新
         text = ckpt_file.read_text(encoding="utf-8").strip()
         if not text:
             return None
@@ -100,7 +99,7 @@ class CheckpointManager:
         last_line = lines[-1]
         data = json.loads(last_line)
 
-        # JSON serialises tuples as lists — convert back
+        # JSON 将元组序列化为列表——转换回来
         raw_history = data.get("tool_history", [])
         tool_history: list[tuple[str, str]] = [
             tuple(item) if isinstance(item, list) else item  # type: ignore[misc]
@@ -114,12 +113,12 @@ class CheckpointManager:
             step_count=data.get("step_count", 0),
             tool_history=tool_history,
             created_at=data.get("created_at", ""),
-            config=None,  # config is never checkpointed
+            config=None,  # config 从不存检查点
         )
         return session
 
     async def close(self) -> None:
-        """Fsync then close the checkpoint file."""
+        """Fsync 后关闭检查点文件。"""
         if self._file and not self._file.closed:
             os.fsync(self._file.fileno())
             self._file.close()

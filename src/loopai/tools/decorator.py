@@ -1,24 +1,23 @@
-""":mod:`loopai.tools.decorator` — ``@tool`` decorator for registering callables.
+""":mod:`loopai.tools.decorator` — 用于注册可调用对象的 ``@tool`` 装饰器。
 
-The decorator inspects the function's type hints and docstring to auto-generate
-Pydantic validation models and JSON Schema (D-01, D-02, D-03). The decorated
-function is wrapped so that argument validation occurs on every call — wrong
-types raise :class:`pydantic.ValidationError` before the function body executes
-(T-02-01).
+该装饰器检查函数的类型提示和文档字符串，自动生成
+Pydantic 验证模型和 JSON Schema（D-01, D-02, D-03）。装饰后的
+函数被包装，使得每次调用时进行参数验证——类型不匹配时，
+在函数体执行前抛出 :class:`pydantic.ValidationError`（T-02-01）。
 
-Decision references:
-    D-01: Full decorator configuration (name, description, permission, timeout, retry, tags)
-    D-02: Pydantic auto-validation from type hints
-    D-03: Python-to-JSON-Schema type mapping table
-    D-07: Per-tool timeout, default 30 s
+决策引用:
+    D-01: 完整装饰器配置（name, description, permission, timeout, retry, tags）
+    D-02: 基于类型提示的 Pydantic 自动验证
+    D-03: Python 到 JSON Schema 类型映射表
+    D-07: 每个工具的超时时间，默认 30 秒
 
-Usage::
+用法::
 
     from loopai.tools.decorator import tool
 
     @tool(name="bash.df", tags=["bash"])
     def df() -> str:
-        '''Show disk usage.'''
+        '''显示磁盘使用情况。'''
         return subprocess.check_output(["df", "-h"]).decode()
 """
 
@@ -36,7 +35,7 @@ from pydantic import BaseModel, ValidationError, create_model
 
 from loopai.tools.types import PermissionLevel, RetryConfig, ToolMetadata
 
-# ── Type mapping: Python annotation → JSON Schema type (D-03) ─────────
+# ── 类型映射: Python 注解 → JSON Schema 类型（D-03）─────────
 
 _PY_TO_JSON_TYPE: dict[type, str] = {
     str: "string",
@@ -47,9 +46,9 @@ _PY_TO_JSON_TYPE: dict[type, str] = {
 
 
 def _annotation_to_json_schema(annotation: type) -> dict:
-    """Recursively convert a Python type annotation to JSON Schema (D-03).
+    """递归将 Python 类型注解转换为 JSON Schema（D-03）。
 
-    Supported mappings:
+    支持的映射:
         str              → {"type": "string"}
         int              → {"type": "integer"}
         float            → {"type": "number"}
@@ -57,22 +56,22 @@ def _annotation_to_json_schema(annotation: type) -> dict:
         Optional[X]      → {"anyOf": [schema(X), {"type": "null"}]}
         list[X]          → {"type": "array", "items": schema(X)}
         Union[X, Y]      → {"anyOf": [schema(X), schema(Y)]}
-        Enum subclass    → {"type": "string", "enum": [...]}
+        Enum 子类        → {"type": "string", "enum": [...]}
         Literal[...]     → {"type": "string", "enum": [...]}
-        (default)        → {"type": "string"}
+        (默认)           → {"type": "string"}
     """
     origin = get_origin(annotation)
     args = get_args(annotation)
 
     # Optional[X] → Union[X, None]
     if origin is Union or origin is Optional or origin is types.UnionType:
-        # Check for Optional (Union with NoneType)
+        # 检查 Optional（Union 包含 NoneType）
         non_none = [a for a in args if a is not type(None)]  # noqa: E721
         if len(non_none) == 1 and len(args) == 2:
             # Optional[X]
             inner = _annotation_to_json_schema(non_none[0])
             return {"anyOf": [inner, {"type": "null"}]}
-        # General Union[X, Y]
+        # 一般 Union[X, Y]
         return {"anyOf": [_annotation_to_json_schema(a) for a in args]}
 
     # list[X]
@@ -82,30 +81,30 @@ def _annotation_to_json_schema(annotation: type) -> dict:
             return {"type": "array", "items": items_schema}
         return {"type": "array"}
 
-    # Literal[...] → enum of strings
+    # Literal[...] → 字符串枚举
     if origin is typing.Literal:
         return {"type": "string", "enum": list(args)}
 
-    # Enum subclass → enum of values
+    # Enum 子类 → 值枚举
     if isinstance(annotation, type) and issubclass(annotation, Enum):
         return {"type": "string", "enum": [e.value for e in annotation]}
 
-    # Direct type mapping
+    # 直接类型映射
     if annotation in _PY_TO_JSON_TYPE:
         return {"type": _PY_TO_JSON_TYPE[annotation]}
 
-    # Fallback
+    # 回退
     return {"type": "string"}
 
 
 def _build_param_schema(func: Callable) -> dict:
-    """Build a JSON Schema ``parameters`` dict from a function's type hints.
+    """从函数的类型提示构建 JSON Schema ``parameters`` 字典。
 
-    Uses the Pydantic ``model_json_schema()`` to derive the schema, then
-    applies our custom mapping for consistency (D-03).
+    使用 Pydantic 的 ``model_json_schema()`` 推导模式，
+    然后应用我们的自定义映射以确保一致性（D-03）。
 
     Returns:
-        A dict like ``{"type": "object", "properties": {...}, "required": [...]}``.
+        形如 ``{"type": "object", "properties": {...}, "required": [...]}`` 的字典。
     """
     sig = inspect.signature(func)
     fields: dict[str, tuple[type, Any]] = {}
@@ -116,20 +115,20 @@ def _build_param_schema(func: Callable) -> dict:
             continue
         annotation = param.annotation
         if annotation is inspect.Parameter.empty:
-            annotation = str  # default to string if unannotated
+            annotation = str  # 无注解时默认为 string
 
         default = param.default
         if default is inspect.Parameter.empty:
             required.append(name)
             fields[name] = (annotation, ...)
         else:
-            # Optional — keep the annotation as-is; Pydantic handles defaults
+            # Optional——保持注解原样；Pydantic 处理默认值
             fields[name] = (annotation, default)
 
     if not fields:
         return {"type": "object", "properties": {}, "required": []}
 
-    # Build properties using our type mapping for consistency
+    # 使用我们的类型映射构建 properties，确保一致性
     properties: dict = {}
     for name, param in sig.parameters.items():
         if name in ("self", "cls"):
@@ -148,7 +147,7 @@ def _build_param_schema(func: Callable) -> dict:
 
 
 def _build_validation_model(func: Callable) -> type[BaseModel]:
-    """Build a Pydantic model for runtime argument validation (D-02)."""
+    """为运行时参数验证构建 Pydantic 模型（D-02）。"""
     sig = inspect.signature(func)
     fields: dict[str, tuple[type, Any]] = {}
 
@@ -166,7 +165,7 @@ def _build_validation_model(func: Callable) -> type[BaseModel]:
             fields[name] = (annotation, default)
 
     if not fields:
-        # No parameters — create a model with no fields
+        # 无参数——创建一个无字段的模型
         return create_model(
             f"_{func.__name__}_Params",
             __base__=BaseModel,
@@ -179,7 +178,7 @@ def _build_validation_model(func: Callable) -> type[BaseModel]:
     )
 
 
-# ── Public API: tool decorator ────────────────────────────────────────
+# ── 公共 API: tool 装饰器 ──────────────────────────────────────────
 
 
 def tool(
@@ -190,25 +189,25 @@ def tool(
     retry: RetryConfig | None = None,
     tags: list[str] | None = None,
 ):
-    """Decorator factory — register a callable as a tool with metadata (D-01).
+    """装饰器工厂——将可调用对象注册为带有元数据的工具（D-01）。
 
     Args:
-        name: Tool identifier. Auto-derived from ``func.__name__`` if ``None``.
-        description: Human-readable description. Auto-derived from docstring if ``None``.
-        permission_level: Security classification (default ``SAFE``).
-        timeout: Execution timeout in seconds (default 30 s).
-        retry: Retry policy. Uses :class:`RetryConfig` defaults if ``None``.
-        tags: Arbitrary string tags for categorization.
+        name: 工具标识符。如为 ``None``，从 ``func.__name__`` 自动推导。
+        description: 人类可读的描述。如为 ``None``，从文档字符串自动推导。
+        permission_level: 安全分类（默认 ``SAFE``）。
+        timeout: 执行超时时间，秒（默认 30 秒）。
+        retry: 重试策略。如为 ``None``，使用 :class:`RetryConfig` 默认值。
+        tags: 用于分类的任意字符串标签。
 
     Returns:
-        A decorator that wraps the function with parameter validation and
-        attaches :class:`ToolMetadata` as ``func.__tool_meta__``.
+        一个装饰器，用参数验证包装函数，并附加
+        :class:`ToolMetadata` 到 ``func.__tool_meta__``。
 
     Example::
 
         @tool(name="bash.df", permission_level=PermissionLevel.SAFE, tags=["bash"])
         def df() -> str:
-            '''Show disk usage.'''
+            '''显示磁盘使用情况。'''
             ...
     """
     if retry is None:
@@ -217,21 +216,21 @@ def tool(
         tags = []
 
     def decorator(func: Callable) -> Callable:
-        # Auto-derive metadata from function
+        # 从函数自动推导元数据
         tool_name = name if name is not None else func.__name__
         tool_desc = description
         if tool_desc is None:
-            # Use docstring first line, or fallback
+            # 使用文档字符串第一行，或回退
             if func.__doc__:
                 tool_desc = inspect.cleandoc(func.__doc__).split("\n")[0].strip()
             else:
                 tool_desc = ""
 
-        # Build validation model and JSON Schema
+        # 构建验证模型和 JSON Schema
         validation_model = _build_validation_model(func)
         param_schema = _build_param_schema(func)
 
-        # Create ToolMetadata
+        # 创建 ToolMetadata
         meta = ToolMetadata(
             name=tool_name,
             description=tool_desc,
@@ -244,7 +243,7 @@ def tool(
             validation_model=validation_model,
         )
 
-        # Build a mapping from parameter name to position index
+        # 构建从参数名到位置索引的映射
         sig = inspect.signature(func)
         param_names = [
             p.name
@@ -255,23 +254,23 @@ def tool(
         def _merge_args_kwargs(
             args: tuple, kwargs: dict
         ) -> dict:
-            """Merge positional args into kwargs using the function signature."""
+            """将位置参数合并到 kwargs 中，使用函数签名。"""
             merged = dict(kwargs)
             for i, value in enumerate(args):
                 if i < len(param_names):
                     merged[param_names[i]] = value
             return merged
 
-        # Determine if the function is async
+        # 确定函数是否为异步
         is_async = inspect.iscoroutinefunction(func)
 
         if is_async:
 
             @wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                # Merge positional and keyword arguments
+                # 合并位置参数和关键字参数
                 merged = _merge_args_kwargs(args, kwargs)
-                # Validate arguments via Pydantic model
+                # 通过 Pydantic 模型验证参数
                 try:
                     validated = validation_model(**merged)
                 except ValidationError:
@@ -285,9 +284,9 @@ def tool(
 
             @wraps(func)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-                # Merge positional and keyword arguments
+                # 合并位置参数和关键字参数
                 merged = _merge_args_kwargs(args, kwargs)
-                # Validate arguments via Pydantic model
+                # 通过 Pydantic 模型验证参数
                 try:
                     validated = validation_model(**merged)
                 except ValidationError:

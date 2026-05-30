@@ -1,8 +1,7 @@
-"""LLMClient: OpenAI-compatible API wrapper with streaming + EventBus.
+"""LLMClient：兼容 OpenAI API 的流式调用封装 + EventBus 集成。
 
-Uses the standard OpenAI streaming API (chat.completions.create with
-stream=True) for broad provider compatibility, then manually parses
-content and tool call deltas.
+使用标准的 OpenAI 流式 API（chat.completions.create 配合 stream=True）
+以获得广泛的提供商兼容性，然后手动解析内容和工具调用增量。
 """
 
 from __future__ import annotations
@@ -18,16 +17,16 @@ from loopai.events.bus import EventBus
 
 
 class LLMClient:
-    """Wraps the OpenAI-compatible API with streaming and EventBus integration.
+    """封装 OpenAI 兼容 API，集成流式输出和 EventBus。
 
-    Streams content and tool call deltas to the EventBus.  Uses the standard
-    chat.completions.create(stream=True) API instead of the beta endpoint,
-    which requires strict tool schemas not supported by all providers.
+    将内容和工具调用增量流式推送到 EventBus。使用标准
+    chat.completions.create(stream=True) API，而非 beta 端点，
+    后者要求的严格工具模式并非所有提供商都支持。
 
     Attributes:
-        config: The AgentConfig used to create the underlying AsyncOpenAI client.
-        bus: The EventBus to publish streaming events to.
-        model: The model name to use for API calls.
+        config: 用于创建底层 AsyncOpenAI 客户端的 AgentConfig。
+        bus: 用于发布流式事件的 EventBus。
+        model: API 调用使用的模型名称。
     """
 
     def __init__(self, config: AgentConfig, bus: EventBus) -> None:
@@ -47,22 +46,22 @@ class LLMClient:
         session_id: str = "",
         step_num: int = 0,
     ) -> dict[str, Any]:
-        """Call the LLM and stream events to the EventBus.
+        """调用 LLM 并将事件流式推送到 EventBus。
 
-        Uses the standard streaming API for provider compatibility.
-        Manually tracks tool call argument accumulation across chunks.
+        使用标准流式 API 以确保提供商兼容性。
+        手动跟踪跨分块的参数累积。
 
         Args:
-            messages: The conversation messages in OpenAI format.
-            tools: Optional list of tool definitions.
-            session_id: Session identifier for event metadata.
-            step_num: Current step number for event metadata.
+            messages: OpenAI 格式的对话消息。
+            tools: 可选的工具定义列表。
+            session_id: 事件元数据的会话标识符。
+            step_num: 事件元数据的当前步骤编号。
 
         Returns:
-            A dict with keys "content", "tool_calls", and "role".
+            包含 "content"、"tool_calls" 和 "role" 键的字典。
 
         Raises:
-            Any exception from the API call (after publishing an Error event).
+            API 调用产生的任何异常（在发布 Error 事件之后）。
         """
         stream_kwargs: dict[str, Any] = {
             "model": self.model,
@@ -73,7 +72,7 @@ class LLMClient:
         if tools:
             stream_kwargs["tools"] = tools
 
-        # Accumulators
+        # 累积器
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         token_usage: dict[str, int] | None = None
@@ -84,7 +83,7 @@ class LLMClient:
             stream = await self._async_client.chat.completions.create(**stream_kwargs)
 
             async for chunk in stream:
-                # Capture usage from final chunk (stream_options include_usage)
+                # 从最终块中捕获使用量（stream_options include_usage）
                 if getattr(chunk, "usage", None):
                     token_usage = {
                         "prompt_tokens": chunk.usage.prompt_tokens,
@@ -95,7 +94,7 @@ class LLMClient:
                 for choice in chunk.choices:
                     delta = choice.delta
 
-                    # Text content
+                    # 文本内容
                     if delta.content:
                         content_parts.append(delta.content)
                         await self.bus.publish(
@@ -108,17 +107,17 @@ class LLMClient:
                             },
                         )
 
-                    # Reasoning content (DeepSeek thinking mode / o1-style)
+                    # 推理内容（DeepSeek 思考模式 / o1 风格）
                     rc = getattr(delta, "reasoning_content", None)
                     if rc and isinstance(rc, str):
                         reasoning_parts.append(rc)
 
-                    # Tool calls
+                    # 工具调用
                     if delta.tool_calls:
                         for tc in delta.tool_calls:
                             idx = tc.index or 0
 
-                            # Initialize accumulator for new tool call
+                            # 为新工具调用初始化累积器
                             if idx not in tool_calls_acc:
                                 tool_calls_acc[idx] = {
                                     "name": "",
@@ -134,7 +133,7 @@ class LLMClient:
                                 if tc.function.arguments:
                                     tool_calls_acc[idx]["args_str"] += tc.function.arguments
 
-                            # Emit ToolCallStart once per tool call
+                            # 每个工具调用只发出一次 ToolCallStart
                             if idx not in tool_starts_emitted and tool_calls_acc[idx]["name"]:
                                 tool_starts_emitted.add(idx)
                                 await self.bus.publish(
@@ -148,7 +147,7 @@ class LLMClient:
                                     },
                                 )
 
-            # Publish content_done
+            # 发布 content_done
             full_content = "".join(content_parts)
             if full_content:
                 await self.bus.publish(
@@ -161,12 +160,12 @@ class LLMClient:
                     },
                 )
 
-            # Build final tool_calls list in OpenAI-compatible format
+            # 以 OpenAI 兼容格式构建最终的 tool_calls 列表
             tool_calls: list[dict[str, Any]] = []
             for idx in sorted(tool_calls_acc.keys()):
                 acc = tool_calls_acc[idx]
                 args_str = acc["args_str"]
-                # Ensure arguments is valid JSON, default to "{}"
+                # 确保 arguments 是有效的 JSON，默认 "{}"
                 try:
                     json.loads(args_str)
                 except (json.JSONDecodeError, TypeError):

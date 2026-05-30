@@ -1,14 +1,13 @@
-""":mod:`loopai.tools.registry` — Instance-based tool registry with namespace support.
+""":mod:`loopai.tools.registry` — 基于实例的工具注册表，支持命名空间。
 
-ToolRegistry accepts callables decorated with ``@tool`` and indexes them
-by their :attr:`ToolMetadata.name`. Multiple registry instances can coexist,
-each with independent tool sets — enabling per-agent or per-session tool
-configurations (D-04).
+ToolRegistry 接受 ``@tool`` 装饰的可调用对象，并按
+:attr:`ToolMetadata.name` 对其进行索引。多个注册表实例可以共存，
+每个拥有独立的工具集——支持按 Agent 或按会话的工具配置（D-04）。
 
-Decision references:
-    D-04: Instance registry + namespace support (e.g. ``bash.ls``, ``disk.du``)
+决策引用:
+    D-04: 实例注册表 + 命名空间支持（例如 ``bash.ls``、``disk.du``）
 
-Usage::
+用法::
 
     from loopai.tools.registry import ToolRegistry
     from loopai.tools.decorator import tool
@@ -30,90 +29,88 @@ from loopai.tools.types import ToolMetadata
 
 
 class ToolRegistry:
-    """Instance-based tool registry with namespace-aware lookup (D-04).
+    """基于实例的工具注册表，支持命名空间感知查找（D-04）。
 
-    Each instance maintains its own ``_tools`` dict indexed by tool name.
-    Two registries are fully independent — registering a tool in one does
-    not affect the other.
+    每个实例维护自己的 ``_tools`` 字典，按工具名索引。
+    两个注册表完全独立——在其中一个注册工具不会影响另一个。
     """
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolMetadata] = {}
 
-    # ── Registration ──────────────────────────────────────────────
+    # ── 注册 ────────────────────────────────────────────────────────
 
     def register(self, tool_fn: Callable) -> None:
-        """Register a ``@tool``-decorated function.
+        """注册一个 ``@tool`` 装饰的函数。
 
-        Reads :attr:`ToolMetadata` from ``tool_fn.__tool_meta__`` and indexes
-        it by ``metadata.name``.
+        从 ``tool_fn.__tool_meta__`` 读取 :attr:`ToolMetadata`，
+        并按 ``metadata.name`` 进行索引。
 
         Args:
-            tool_fn: A function decorated with :func:`~loopai.tools.decorator.tool`.
+            tool_fn: 用 :func:`~loopai.tools.decorator.tool` 装饰的函数。
 
         Raises:
-            AttributeError: If *tool_fn* was not decorated with ``@tool``.
+            AttributeError: 如果 *tool_fn* 未用 ``@tool`` 装饰。
         """
         meta: ToolMetadata = tool_fn.__tool_meta__
         self._tools[meta.name] = meta
 
     def register_many(self, tools: list[Callable]) -> None:
-        """Register multiple tools at once.
+        """一次性注册多个工具。
 
         Args:
-            tools: A list of ``@tool``-decorated functions.
+            tools: ``@tool`` 装饰的函数列表。
         """
         for t in tools:
             self.register(t)
 
-    # ── Lookup ────────────────────────────────────────────────────
+    # ── 查找 ────────────────────────────────────────────────────────
 
     def get(self, name: str) -> ToolMetadata | None:
-        """Retrieve a tool's metadata by its full name.
+        """按完整名称检索工具的元数据。
 
-        Supports ``"namespace.name"`` format — the full string is used as
-        the lookup key.
+        支持 ``"namespace.name"`` 格式——完整字符串用作查找键。
 
         Args:
-            name: The tool name (e.g. ``"bash.ls"``).
+            name: 工具名称（例如 ``"bash.ls"``）。
 
         Returns:
-            :class:`ToolMetadata` if found, ``None`` otherwise.
+            如果找到返回 :class:`ToolMetadata`，否则返回 ``None``。
         """
         return self._tools.get(name)
 
     def list_namespace(self, namespace: str) -> list[ToolMetadata]:
-        """Return all tools whose name starts with ``namespace + '.'``.
+        """返回以 ``namespace + '.'`` 开头的所有工具。
 
         Args:
-            namespace: The namespace prefix (e.g. ``"bash"``).
+            namespace: 命名空间前缀（例如 ``"bash"``）。
 
         Returns:
-            List of :class:`ToolMetadata` in the namespace (may be empty).
+            命名空间内的 :class:`ToolMetadata` 列表（可能为空）。
         """
         prefix = namespace + "."
         return [m for name, m in self._tools.items() if name.startswith(prefix)]
 
     def list_all(self) -> list[ToolMetadata]:
-        """Return metadata for every registered tool.
+        """返回所有已注册工具的元数据。
 
         Returns:
-            List of all :class:`ToolMetadata` objects.
+            全部 :class:`ToolMetadata` 对象的列表。
         """
         return list(self._tools.values())
 
-    # ── Schema export ─────────────────────────────────────────────
+    # ── 模式导出 ───────────────────────────────────────────────────
 
     def get_schemas(self, exclude_open: set[str] | None = None) -> list[dict]:
-        """Return OpenAI function-calling JSON Schemas for all registered tools.
+        """返回所有已注册工具的 OpenAI 函数调用 JSON Schema。
 
         Args:
-            exclude_open: Optional set of tool names to exclude (e.g., circuit-broken tools).
+            exclude_open: 可选的要排除的工具名称集合（例如熔断器打开的）。
 
         Returns:
-            List of OpenAI-compatible tool schema dicts, minus excluded tools.
+            OpenAI 兼容的工具模式字典列表，减去被排除的工具。
 
-        Each element is a dict with shape::
+        每个元素是一个具有以下形状的字典::
 
             {
                 "type": "function",
@@ -129,7 +126,7 @@ class ToolRegistry:
             tools = [m for m in tools if m.name not in exclude_open]
         return [meta.to_openai_schema() for meta in tools]
 
-    # ── Introspection ─────────────────────────────────────────────
+    # ── 内省 ───────────────────────────────────────────────────────
 
     def __len__(self) -> int:
         return len(self._tools)

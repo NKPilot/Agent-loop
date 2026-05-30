@@ -1,8 +1,7 @@
-"""Per-tool circuit breaker with sliding-window failure rate.
+"""每工具独立、基于滑动窗口失败率的熔断器。
 
-Implements the standard closed -> open -> half-open -> closed state
-machine (D-05).  State transitions are published to the EventBus
-(D-06) so the dashboard and JSONL logger can observe them.
+实现标准 closed → open → half-open → closed 状态机（D-05）。
+状态转换发布到 EventBus（D-06），使仪表盘和 JSONL 日志器可观察。
 """
 
 from __future__ import annotations
@@ -19,22 +18,22 @@ if TYPE_CHECKING:
 
 
 class CircuitState(str, Enum):
-    """Circuit breaker states."""
+    """熔断器状态。"""
 
-    CLOSED = "closed"  # Normal operation — calls are allowed
-    OPEN = "open"  # Tripped — calls are blocked
-    HALF_OPEN = "half_open"  # Probing — one trial call allowed
+    CLOSED = "closed"  # 正常操作——允许调用
+    OPEN = "open"  # 已触发——阻止调用
+    HALF_OPEN = "half_open"  # 探测中——允许一次试探调用
 
 
 class CircuitBreaker:
-    """Per-tool circuit breaker driven by sliding-window failure rate.
+    """由滑动窗口失败率驱动的每工具独立熔断器。
 
-    Each tool has its own independent sliding window and state.
-    After cooldown_seconds, a single probe call is allowed (half-open).
-    Success closes the circuit; failure re-opens it.
+    每个工具有自己独立的滑动窗口和状态。
+    经过 cooldown_seconds 后，允许一次探测调用（half-open）。
+    成功则关闭电路；失败则重新打开。
 
-    Thread-safety for the half-open probe is provided via an
-    ``asyncio.Lock`` and a ``_probing`` set (Pitfall 1).
+    半开探测的线程安全通过 ``asyncio.Lock`` 和 ``_probing``
+    集合保证（陷阱 1）。
     """
 
     def __init__(
@@ -47,26 +46,26 @@ class CircuitBreaker:
         self.failure_threshold = failure_threshold
         self.cooldown_seconds = cooldown_seconds
 
-        # Per-tool state
+        # 每工具独立状态
         self._window: dict[str, deque[bool]] = {}  # tool_name -> [success/fail]
         self._state: dict[str, CircuitState] = {}  # tool_name -> state
-        self._opened_at: dict[str, float] = {}  # tool_name -> monotonic timestamp
-        self._probing: set[str] = set()  # tools currently in half-open probe
+        self._opened_at: dict[str, float] = {}  # tool_name -> monotonic 时间戳
+        self._probing: set[str] = set()  # 当前处于半开探测中的工具
         self._lock: asyncio.Lock = asyncio.Lock()
 
-    # ── Public API ──────────────────────────────────────────────────
+    # ── 公共 API ──────────────────────────────────────────────────
 
     def check(self, tool_name: str) -> tuple[bool, CircuitState]:
-        """Check whether *tool_name* is allowed to execute.
+        """检查 *tool_name* 是否允许执行。
 
         Returns:
-            ``(allowed, current_state)``.
-            - ``(True, CLOSED)`` — normal operation.
-            - ``(True, HALF_OPEN)`` — probe call allowed.
-            - ``(False, OPEN)`` — blocked (cooldown not expired or
-              another probe already in progress).
+            ``(allowed, current_state)``。
+            - ``(True, CLOSED)``——正常操作。
+            - ``(True, HALF_OPEN)``——试探调用允许。
+            - ``(False, OPEN)``——阻止（冷却未到期或
+              已有其他探测进行中）。
         """
-        # Half-open mutual exclusion (Pitfall 1)
+        # 半开互斥（陷阱 1）
         if tool_name in self._probing:
             return (False, CircuitState.OPEN)
 
@@ -90,25 +89,25 @@ class CircuitBreaker:
         *,
         session_id: str = "",
     ) -> None:
-        """Record a tool execution outcome and update state.
+        """记录工具执行结果并更新状态。
 
         Args:
-            tool_name: The tool that was executed.
-            success: ``True`` if execution succeeded.
-            bus: Optional EventBus for publishing state-change events.
-            session_id: Session ID for event payloads.
+            tool_name: 被执行的工具。
+            success: 执行成功则为 ``True``。
+            bus: 可选的 EventBus，用于发布状态变更事件。
+            session_id: 事件负载的会话 ID。
         """
-        # Initialise sliding window for new tools
+        # 为新工具初始化滑动窗口
         if tool_name not in self._window:
             self._window[tool_name] = deque(maxlen=self.window_size)
             self._state.setdefault(tool_name, CircuitState.CLOSED)
 
         self._window[tool_name].append(success)
 
-        # Remove from probing set (probe completed)
+        # 从探测集合中移除（探测已完成）
         self._probing.discard(tool_name)
 
-        # Calculate failure rate
+        # 计算失败率
         window = self._window[tool_name]
         failures = sum(1 for r in window if not r)
         rate = failures / len(window) if window else 0.0
@@ -177,13 +176,13 @@ class CircuitBreaker:
         session_id: str,
         bus: EventBus | None = None,
     ) -> None:
-        """Convenience wrapper that passes *session_id* to ``record``."""
+        """便捷包装，将 *session_id* 传递给 ``record``。"""
         await self.record(tool_name, success, bus, session_id=session_id)
 
     def get_open_tools(self) -> set[str]:
-        """Return the set of tool names currently in OPEN state.
+        """返回当前处于 OPEN 状态的工具名称集合。
 
-        Used by the FSM to filter tool schemas presented to the LLM.
+        由 FSM 使用，用于过滤向 LLM 展示的工具模式。
         """
         return {
             name
@@ -192,14 +191,14 @@ class CircuitBreaker:
         }
 
     def get_tool_state(self, tool_name: str) -> CircuitState:
-        """Return the current circuit state for *tool_name*.
+        """返回 *tool_name* 的当前电路状态。
 
-        Defaults to ``CLOSED`` if the tool has no recorded state.
+        如果工具没有记录状态，默认为 ``CLOSED``。
         """
         return self._state.get(tool_name, CircuitState.CLOSED)
 
     def reset_tool(self, tool_name: str) -> None:
-        """Reset all state for *tool_name* (window, state, timers, probing)."""
+        """重置 *tool_name* 的所有状态（窗口、状态、计时器、探测）。"""
         self._window.pop(tool_name, None)
         self._state.pop(tool_name, None)
         self._opened_at.pop(tool_name, None)

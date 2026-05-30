@@ -263,11 +263,11 @@ class CLIAgentRenderer:
             )
 
         elif event_type == "confirmation_required":
-            # Store confirmation for processing in the main loop
+            # 保存确认信息，在主循环中处理
             self.pending_confirmation = dict(event)
 
         elif event_type == "confirmation_response":
-            # Confirmation was handled — clear pending state
+            # 确认已处理——清除待处理状态
             self.pending_confirmation = None
 
     def _handle_confirmation(self, console: Console) -> None:
@@ -289,11 +289,11 @@ class CLIAgentRenderer:
         reason = event.get("reason", "危险命令")
         confirmation_id = event.get("confirmation_id", "")
 
-        # Build and display the confirmation panel
+        # 构建并显示确认面板
         console.print()
         console.rule("[bold red]危险命令确认[/bold red]")
 
-        # Command details table
+        # 命令详情表格
         table = Table(show_header=False, border_style="red")
         table.add_column("字段", style="bold yellow")
         table.add_column("值", style="white")
@@ -302,16 +302,16 @@ class CLIAgentRenderer:
         table.add_row("危险原因", reason)
         console.print(table)
 
-        # Prompt for y/n
+        # 提示输入 y/n
         console.print()
         choice = console.input("  [bold yellow]确认执行此命令? (y/n):[/bold yellow] ")
         approved = choice.strip().lower() in ("y", "yes", "是")
 
-        # Notify PermissionGuard
+        # 通知 PermissionGuard
         if self._permission_guard:
             self._permission_guard.respond(confirmation_id, approved)
 
-        # Publish confirmation_response for audit trail
+        # 发布 confirmation_response 用于审计追踪
         if approved:
             status_text = "已确认"
             status_style = "green"
@@ -321,7 +321,7 @@ class CLIAgentRenderer:
         console.print(f"  [{status_style}]{status_text}[/{status_style}]")
         console.print()
 
-        # Clear pending confirmation
+        # 清除待处理确认
         self.pending_confirmation = None
 
     async def run(self, max_steps: int = 15) -> None:
@@ -365,8 +365,8 @@ class CLIAgentRenderer:
                     live.update(self.build_renderable())
                     last_update = now
 
-                # Handle confirmation_required: pause Live, show prompt,
-                # get user input, resume Live.
+                # 处理 confirmation_required：暂停 Live 显示，
+                # 展示确认面板、获取用户输入、恢复 Live 显示。
                 if self.pending_confirmation:
                     live.stop()
                     self._handle_confirmation(console)

@@ -37,11 +37,11 @@ class ValidationError(ValueError):
 
 
 class LoopClassification(StrEnum):
-    """Classification of detected loop patterns for metacognitive prompting (RES-02).
+    """检测到的循环模式分类，用于元认知提示（RES-02）。
 
-    LOOP_EXACT_SAME: Same tool called with the same arguments repeatedly.
-    LOOP_SAME_TOOL: Same tool called repeatedly but with different arguments.
-    LOOP_STUCK: Different tools called but no meaningful progress (heuristic).
+    LOOP_EXACT_SAME: 同一工具用相同参数反复调用。
+    LOOP_SAME_TOOL: 同一工具反复调用但参数不同。
+    LOOP_STUCK: 调用了不同工具但无实质进展（启发式）。
     """
 
     LOOP_EXACT_SAME = "exact_same"
@@ -118,12 +118,12 @@ class LoopDetector:
 
         self._window.append((tool_name, sig))
 
-        # Determine classification based on window analysis (always run)
+        # 基于窗口分析确定分类（始终执行）
         classification: LoopClassification | None = None
         recent = list(self._window)[-min(5, len(self._window)):]
 
         if recent and self._consecutive_count >= self._warn_threshold:
-            # Primary path: consecutive same-signature calls trigger classification
+            # 主路径：连续相同签名调用触发分类
             if all(t == tool_name and s == sig for t, s in recent):
                 classification = LoopClassification.LOOP_EXACT_SAME
             elif all(t == tool_name for t, _ in recent):
@@ -131,14 +131,14 @@ class LoopDetector:
             else:
                 classification = LoopClassification.LOOP_STUCK
         elif recent and len(recent) >= self._warn_threshold:
-            # Secondary path: window has enough entries but different signatures
-            # Analyze pattern without consecutive same-signature requirement
+            # 辅助路径：窗口有足够条目但签名不同
+            # 在不要求连续相同签名的情况下分析模式
             tools = {t for t, _ in recent}
             if len(tools) == 1:
-                # All entries are the same tool (but different args)
+                # 所有条目都是同一工具（但参数不同）
                 classification = LoopClassification.LOOP_SAME_TOOL
             elif len(tools) >= self._warn_threshold:
-                # All different tools — stuck pattern
+                # 全部不同工具——卡住模式
                 classification = LoopClassification.LOOP_STUCK
 
         if self._consecutive_count > self._block_threshold:
@@ -155,15 +155,15 @@ class LoopDetector:
         classification: LoopClassification | None,
         consecutive_count: int,
     ) -> str:
-        """Generate a metacognitive prompt explaining why the loop was detected.
+        """生成元认知提示，解释为何检测到循环。
 
         Args:
-            tool_name: The tool being called.
-            classification: The loop classification type.
-            consecutive_count: Number of consecutive identical calls.
+            tool_name: 被调用的工具。
+            classification: 循环分类类型。
+            consecutive_count: 连续相同调用的次数。
 
         Returns:
-            A Chinese metacognitive prompt string to inject as system message.
+            作为系统消息注入的中文元认知提示字符串。
         """
         if classification == LoopClassification.LOOP_EXACT_SAME:
             return (
@@ -355,24 +355,23 @@ class BudgetGuard:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PermissionGuard — dangerous command confirmation via EventBus (D-08, D-09)
+# PermissionGuard — 通过 EventBus 实现危险命令确认（D-08, D-09）
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class PermissionGuard:
-    """Permission guard — checks tool permission level before execution.
+    """权限守卫——在执行前检查工具权限级别。
 
-    SAFE and MODERATE commands are allowed immediately.  DANGEROUS commands
-    trigger a ``confirmation_required`` event on the :class:`EventBus` and
-    block until the user responds (via :meth:`respond`) or the confirmation
-    timeout expires.
+    SAFE 和 MODERATE 命令立即放行。DANGEROUS 命令在
+    :class:`EventBus` 上触发 ``confirmation_required`` 事件，
+    并阻塞直到用户响应（通过 :meth:`respond`）或确认超时到期。
 
-    Decision references:
-        D-08: Whitelist/blacklist classification with dangerous escalation
-        D-09: Event-driven confirmation pause (EventBus + CLI/frontend consumer)
+    决策引用:
+        D-08: 白名单/黑名单分类搭配危险升级
+        D-09: 事件驱动的确认暂停（EventBus + CLI/前端消费者）
 
     Attributes:
-        confirmation_timeout: Seconds to wait for user response (default 120 s).
+        confirmation_timeout: 等待用户响应的秒数（默认 120 秒）。
 
     Example::
 
@@ -383,7 +382,7 @@ class PermissionGuard:
         bus = EventBus()
         guard = PermissionGuard(bus, confirmation_timeout=120.0)
 
-        # In the agent loop (async context):
+        # 在 Agent 循环中（异步上下文）：
         should_proceed, action = await guard.check(
             tool_name="bash.rm",
             tool_args={"path": "/tmp/file"},
@@ -392,7 +391,7 @@ class PermissionGuard:
             step_num=3,
         )
 
-        # In the CLI consumer (sync context):
+        # 在 CLI 消费者中（同步上下文）：
         guard.respond("sess-1_bash.rm_3", approved=True)
     """
 
@@ -404,10 +403,10 @@ class PermissionGuard:
         self._bus: EventBus = bus
         self.confirmation_timeout = confirmation_timeout
 
-        #: Map confirmation_id -> asyncio.Event for blocking wait.
+        #: Map confirmation_id -> asyncio.Event 用于阻塞等待。
         self._pending: dict[str, asyncio.Event] = {}
 
-        #: Map confirmation_id -> bool (user's approve/deny decision).
+        #: Map confirmation_id -> bool（用户的批准/拒绝决定）。
         self._results: dict[str, bool] = {}
 
     # ── Public API ──────────────────────────────────────────────────────
@@ -422,35 +421,35 @@ class PermissionGuard:
         *,
         tool_call_id: str = "",
     ) -> tuple[bool, str]:
-        """Check whether this tool call should proceed.
+        """检查此次工具调用是否应继续执行。
 
         Args:
-            tool_name: The tool's registered name (e.g. ``"bash.rm"``).
-            tool_args: The tool's argument dict.
-            permission_level: Pre-classified :class:`PermissionLevel`.
-            session_id: The current agent session identifier.
-            step_num: The current agent step number.
+            tool_name: 工具注册名称（例如 ``"bash.rm"``）。
+            tool_args: 工具参数字典。
+            permission_level: 预分类的 :class:`PermissionLevel`。
+            session_id: 当前 Agent 会话标识符。
+            step_num: 当前 Agent 步骤编号。
 
         Returns:
-            A ``(should_proceed, action)`` tuple:
-                - ``(True, "allow")`` — SAFE or MODERATE, or DANGEROUS with user approval.
-                - ``(False, "confirm_required")`` — DANGEROUS, event published, awaiting response.
-                - ``(False, "user_denied")`` — User explicitly denied the operation.
-                - ``(False, "timeout")`` — No response received within timeout.
+            ``(should_proceed, action)`` 元组：
+                - ``(True, "allow")``——SAFE 或 MODERATE，或 DANGEROUS 但用户已批准。
+                - ``(False, "confirm_required")``——DANGEROUS，已发布事件，等待响应。
+                - ``(False, "user_denied")``——用户明确拒绝了该操作。
+                - ``(False, "timeout")``——超时内未收到响应。
         """
         from loopai.tools.types import PermissionLevel
 
-        # SAFE and MODERATE commands pass through immediately.
+        # SAFE 和 MODERATE 命令立即放行。
         if permission_level in (PermissionLevel.SAFE, PermissionLevel.MODERATE):
             return (True, "allow")
 
-        # DANGEROUS — require user confirmation.
-        # Include tool_call_id so each tool call gets a unique confirmation
+        # DANGEROUS——需要用户确认。
+        # 包含 tool_call_id 确保每个工具调用获得唯一确认
         confirmation_id = f"{session_id}_{tool_name}_{step_num}"
         if tool_call_id:
             confirmation_id += f"_{tool_call_id}"
 
-        # Publish confirmation_required event for CLI/frontend consumers.
+        # 发布 confirmation_required 事件供 CLI/前端消费者处理。
         await self._bus.publish(
             "confirmation_required",
             {
@@ -466,7 +465,7 @@ class PermissionGuard:
             },
         )
 
-        # Create a blocking event and wait for respond() or timeout.
+        # 创建阻塞事件，等待 respond() 或超时。
         event = asyncio.Event()
         self._pending[confirmation_id] = event
 
@@ -475,7 +474,7 @@ class PermissionGuard:
                 event.wait(), timeout=self.confirmation_timeout
             )
         except asyncio.TimeoutError:
-            # Clean up and publish timeout event.
+            # 清理并发布超时事件。
             self._pending.pop(confirmation_id, None)
             self._results.pop(confirmation_id, None)
 
@@ -492,11 +491,11 @@ class PermissionGuard:
             )
             return (False, "timeout")
 
-        # Retrieve and clean up the user's decision.
+        # 检索并清理用户的决定。
         approved = self._results.pop(confirmation_id, False)
         self._pending.pop(confirmation_id, None)
 
-        # Publish the response event for audit trail.
+        # 发布响应事件用于审计追踪。
         await self._bus.publish(
             "confirmation_response",
             {
@@ -515,15 +514,15 @@ class PermissionGuard:
         return (False, "user_denied")
 
     def respond(self, confirmation_id: str, approved: bool) -> None:
-        """Respond to a pending confirmation request.
+        """响应待处理的确认请求。
 
-        Called by the CLI consumer (or any external agent) to approve or
-        deny a DANGEROUS command.  This is a synchronous method — it stores
-        the result and signals the waiting coroutine.
+        由 CLI 消费者（或任何外部 Agent）调用，用于批准或
+        拒绝 DANGEROUS 命令。这是一个同步方法——它存储
+        结果并通知等待中的协程。
 
         Args:
-            confirmation_id: The confirmation ID from the event payload.
-            approved: ``True`` to allow execution, ``False`` to deny.
+            confirmation_id: 来自事件负载的确认 ID。
+            approved: ``True`` 允许执行，``False`` 拒绝。
         """
         self._results[confirmation_id] = approved
         if confirmation_id in self._pending:
@@ -531,31 +530,29 @@ class PermissionGuard:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TokenGuard — token-budget guard (D-01, D-03)
+# TokenGuard — token 预算守卫（D-01, D-03）
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TokenGuard:
-    """Token budget guard — detects when context usage reaches threshold.
+    """Token 预算守卫——检测上下文使用量何时达到阈值。
 
-    Checks the current message list against a configurable context-window
-    threshold.  Returns a signal that the caller (typically the FSM) can
-    use to decide whether to trigger :class:`ContextCompressor`.
+    根据可配置的上下文窗口阈值检查当前消息列表。
+    返回一个信号，调用者（通常是 FSM）可据此决定
+    是否触发 :class:`ContextCompressor`。
 
-    This guard follows the same pattern as :class:`BudgetGuard`:
-    ``check()`` returns a status signal without directly modifying the
-    message list.
+    此守卫遵循与 :class:`BudgetGuard` 相同的模式：
+    ``check()`` 返回状态信号而不直接修改消息列表。
 
-    Decision references:
-        D-01: Sliding-window + summary compression at 75 % threshold.
-        D-03: tiktoken cl100k_base for approximate counting.
+    决策引用:
+        D-01: 滑动窗口 + 在 75% 阈值时摘要压缩。
+        D-03: tiktoken cl100k_base 用于近似计数。
 
     Args:
-        token_counter: A :class:`~loopai.context.token_counter.TokenCounter`
-            instance.
-        window_size: Token budget for the context window (default 128000).
-        threshold: Fraction of *window_size* that triggers a ``"compress"``
-            signal (default 0.75).
+        token_counter: :class:`~loopai.context.token_counter.TokenCounter` 实例。
+        window_size: 上下文窗口的 token 预算（默认 128000）。
+        threshold: 触发 ``"compress"`` 信号的 *window_size* 比例
+            （默认 0.75）。
     """
 
     def __init__(
@@ -569,18 +566,18 @@ class TokenGuard:
         self._threshold = threshold
 
     def check(self, messages: list[dict]) -> tuple[str, int, int]:
-        """Check whether the message list exceeds the token threshold.
+        """检查消息列表是否超过 token 阈值。
 
         Args:
-            messages: The current message list.
+            messages: 当前消息列表。
 
         Returns:
-            ``(action, token_count, threshold_tokens)``.
-            - ``action``: ``"ok"`` if the token count is below the threshold,
-              ``"compress"`` if it meets or exceeds the threshold.
-            - ``token_count``: Current token count of the messages.
-            - ``threshold_tokens``: The threshold value
-              (``window_size * threshold``, rounded).
+            ``(action, token_count, threshold_tokens)``。
+            - ``action``: ``"ok"`` 如果 token 计数低于阈值，
+              ``"compress"`` 如果达到或超过阈值。
+            - ``token_count``: 当前消息的 token 计数。
+            - ``threshold_tokens``: 阈值
+              （``window_size * threshold``，已取整）。
         """
         token_count = self._counter.count_messages(messages)
         threshold_tokens = int(self._window_size * self._threshold)
@@ -597,13 +594,13 @@ class TokenGuard:
 
 @dataclass
 class GuardResult:
-    """Result of a guard check in the pipeline.
+    """守卫管道中一次守卫检查的结果。
 
     Attributes:
-        action: "ok" (all clear), "compress" (compression needed from TokenGuard),
-                "blocked" (guard violation), "warn" (approaching limit).
-        guard_name: Name of the guard class that produced this result.
-        detail: Human-readable detail message for the blocking guard.
+        action: "ok"（全部通过）、"compress"（TokenGuard 需要压缩）、
+                "blocked"（守卫违规）、"warn"（接近限制）。
+        guard_name: 产生此结果的守卫类名称。
+        detail: 面向用户的阻止守卫详细消息。
     """
 
     action: str
@@ -617,14 +614,13 @@ class GuardResult:
 
 
 class CostGuard:
-    """Cost estimation guard — estimates LLM call cost from token count.
+    """成本估算守卫——根据 token 计数估算 LLM 调用成本。
 
-    Uses a hardcoded model pricing table. Returns a signal when estimated
-    cost exceeds the per-call budget.
+    使用硬编码的模型定价表。当估算成本超过单次调用预算时返回信号。
 
     Attributes:
-        model_cost_per_1k: Dict mapping model prefix to (input_cost_per_1k, output_cost_per_1k).
-        max_cost_per_call: Maximum allowed cost per LLM call in USD (default 0.05).
+        model_cost_per_1k: 模型前缀到 (input_cost_per_1k, output_cost_per_1k) 的映射。
+        max_cost_per_call: 单次 LLM 调用的最大允许成本（美元，默认 0.05）。
     """
 
     _DEFAULT_PRICING: dict[str, tuple[float, float]] = {
@@ -644,22 +640,22 @@ class CostGuard:
         self._pricing = pricing or dict(self._DEFAULT_PRICING)
 
     def estimate_cost(self, token_count: int, model_name: str = "gpt-4o") -> float:
-        """Estimate cost for a single LLM call.
+        """估算单次 LLM 调用的成本。
 
-        Uses model prefix matching (e.g., "gpt-4o-2024-08-06" matches "gpt-4o").
-        If model not found in pricing table, uses gpt-4o pricing as fallback.
+        使用模型前缀匹配（例如 "gpt-4o-2024-08-06" 匹配 "gpt-4o"）。
+        如果在定价表中找不到模型，则使用 gpt-4o 定价作为回退。
 
-        Returns estimated cost in USD (rounded to 6 decimal places).
+        返回以美元为单位的估算成本（四舍五入到 6 位小数）。
         """
         input_cost, output_cost = self._get_rates(model_name)
-        # Conservative estimate: assume output is ~30% of total tokens
+        # 保守估计：假设输出约为总 token 的 30%
         input_tokens = int(token_count * 0.7)
         output_tokens = token_count - input_tokens
         cost = (input_tokens / 1000) * input_cost + (output_tokens / 1000) * output_cost
         return round(cost, 6)
 
     def _get_rates(self, model_name: str) -> tuple[float, float]:
-        """Look up pricing rates for a model name with prefix matching."""
+        """通过前缀匹配查找模型名称的定价费率。"""
         for prefix, rates in self._pricing.items():
             if model_name.startswith(prefix):
                 return rates
@@ -667,15 +663,15 @@ class CostGuard:
 
     def check(self, messages: list[dict], token_count: int | None = None,
               model_name: str = "gpt-4o") -> GuardResult:
-        """Check if estimated cost is within budget.
+        """检查估算成本是否在预算内。
 
         Args:
-            messages: Message list (used if token_count not provided — unused in this version).
-            token_count: Pre-computed token count. If None, uses len(messages) * 500 as rough estimate.
-            model_name: Model name for pricing lookup.
+            messages: 消息列表（token_count 未提供时使用——此版本未使用）。
+            token_count: 预计算的 token 计数。如果为 None，使用 len(messages) * 500 作为粗略估算。
+            model_name: 用于定价查找的模型名称。
 
         Returns:
-            GuardResult with action="ok" if cost within budget, or "blocked" if over budget.
+            如果成本在预算内，返回 action="ok" 的 GuardResult；超出预算则返回 "blocked"。
         """
         if token_count is None:
             token_count = max(len(messages) * 500, 1000)  # Rough estimate fallback
@@ -699,14 +695,14 @@ class CostGuard:
 
 
 class RateLimitGuard:
-    """Rate limit guard — limits tool call frequency within a time window.
+    """速率限制守卫——在时间窗口内限制工具调用频率。
 
-    Uses a sliding time window (not sliding count) per tool.
-    Tracks call timestamps and blocks if calls exceed the limit within the window.
+    为每工具使用滑动时间窗口（非滑动计数）。
+    追踪调用时间戳，如果窗口内调用超过限制则阻止。
 
     Attributes:
-        max_calls: Maximum allowed calls within the time window (default 10).
-        window_seconds: Time window in seconds (default 60.0).
+        max_calls: 时间窗口内允许的最大调用次数（默认 10）。
+        window_seconds: 时间窗口秒数（默认 60.0）。
     """
 
     def __init__(self, max_calls: int = 10, window_seconds: float = 60.0) -> None:
@@ -715,18 +711,18 @@ class RateLimitGuard:
         self._call_times: dict[str, list[float]] = {}  # tool_name -> [timestamps]
 
     def check(self, tool_name: str) -> GuardResult:
-        """Check if tool has exceeded its rate limit.
+        """检查工具是否超出速率限制。
 
         Args:
-            tool_name: The tool to check rate limit for.
+            tool_name: 要检查速率限制的工具。
 
         Returns:
-            GuardResult with action="ok" if within limit, "blocked" if exceeded.
+            如果在限制内，返回 action="ok" 的 GuardResult；超出则返回 "blocked"。
         """
         now = time.monotonic()
         timestamps = self._call_times.get(tool_name, [])
 
-        # Prune timestamps outside the window
+        # 修剪窗口外的时间戳
         cutoff = now - self.window_seconds
         active = [t for t in timestamps if t >= cutoff]
         self._call_times[tool_name] = active
@@ -746,9 +742,9 @@ class RateLimitGuard:
         return GuardResult(action="ok", guard_name="RateLimitGuard")
 
     def record_call(self, tool_name: str) -> None:
-        """Record a tool call for rate limiting.
+        """为速率限制记录一次工具调用。
 
-        Must be called after the tool executes to update the rate counter.
+        必须在工具执行后调用，以更新速率计数器。
         """
         if tool_name not in self._call_times:
             self._call_times[tool_name] = []
@@ -761,33 +757,33 @@ class RateLimitGuard:
 
 
 class GuardPipeline:
-    """Sequential guard pipeline with short-circuit on first non-ok result.
+    """顺序守卫管道，遇到第一个非 ok 结果时短路。
 
-    Runs each guard's check() in order. If any guard returns action != "ok",
-    the pipeline short-circuits and returns that guard's result immediately.
+    按顺序运行每个守卫的 check()。如果任何守卫返回 action != "ok"，
+    管道立即短路并返回该守卫的结果。
 
-    Guards are injected as callables. The pipeline normalizes different
-    return types: GuardResult objects (CostGuard, RateLimitGuard) and
-    tuples (TokenGuard returning (action, count, threshold)).
+    守卫以可调用对象方式注入。管道规范化不同的返回类型：
+    GuardResult 对象（CostGuard、RateLimitGuard）和
+    元组（TokenGuard 返回 (action, count, threshold)）。
     """
 
     def __init__(self, guards: list[Any]) -> None:
         self._guards = guards
 
     def check(self, messages: list[dict]) -> GuardResult:
-        """Run each guard sequentially. Short-circuit on first non-ok result.
+        """顺序运行每个守卫。遇到第一个非 ok 结果时短路。
 
         Args:
-            messages: The current message list (passed to each guard).
+            messages: 当前消息列表（传递给每个守卫）。
 
         Returns:
-            GuardResult from the first blocking guard, or GuardResult(action="ok")
-            if all guards pass.
+            首个阻止型守卫的 GuardResult，或所有守卫通过时返回
+            GuardResult(action="ok")。
         """
         for guard in self._guards:
             raw = guard.check(messages)
 
-            # Normalize: handle both GuardResult objects and tuple returns
+            # 规范化：处理 GuardResult 对象和元组两种返回类型
             if isinstance(raw, GuardResult):
                 result = raw
             elif isinstance(raw, tuple):
