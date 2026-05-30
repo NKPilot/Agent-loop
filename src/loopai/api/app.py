@@ -6,10 +6,12 @@ alongside the existing CLI entry point — both share the same
 EventBus, Session, and tool infrastructure.
 """
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from loopai.events.bus import EventBus
 
@@ -42,13 +44,26 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # API routes — stream router is mounted here; sessions and control routers
-    # will be added in subsequent plans.
+    # API routes — stream, sessions, and control routers
     from loopai.api.routes import control, sessions, stream  # noqa: E402
 
     app.include_router(stream.router, prefix="/api")
     app.include_router(sessions.router, prefix="/api")
     app.include_router(control.router, prefix="/api")
+
+    # StaticFiles: serve frontend production build (SPA fallback via html=True).
+    # Must be mounted AFTER API routes so /api/* paths take priority.
+    # Only mounts if frontend/dist exists (no-op during development).
+    frontend_dist = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "frontend", "dist"
+    )
+    frontend_dist = os.path.abspath(frontend_dist)
+    if os.path.isdir(frontend_dist):
+        app.mount(
+            "/",
+            StaticFiles(directory=frontend_dist, html=True),
+            name="frontend",
+        )
 
     return app
 
