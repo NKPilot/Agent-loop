@@ -55,6 +55,22 @@ class ToolRegistry:
         meta: ToolMetadata = tool_fn.__tool_meta__
         self._tools[meta.name] = meta
 
+    def register_meta(self, meta: ToolMetadata) -> None:
+        """直接注册一个已有的 ToolMetadata 实例。
+
+        用于 AgentTool 桥接——AgentTool 构造自己的 ToolMetadata，
+        然后通过此方法注册到 ToolRegistry，无需经过 @tool 装饰器。
+
+        Args:
+            meta: 已构造的 ToolMetadata 实例。
+
+        Raises:
+            ValueError: 如果名称已存在。
+        """
+        if meta.name in self._tools:
+            raise ValueError(f"Tool '{meta.name}' is already registered")
+        self._tools[meta.name] = meta
+
     def register_many(self, tools: list[Callable]) -> None:
         """一次性注册多个工具。
 
