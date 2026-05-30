@@ -94,25 +94,30 @@ class ReActFSM:
         self.rate_limit_guard = rate_limit_guard
         self._exit_reason = "completed"
         self._last_act_failed = False
+        self._round_num: int = 0
+        self._turn_token_usage: dict | None = None
 
         # 跟踪第 2 层恢复（上下文内重试）
         self._layer2_retry_count: dict[str, int] = {}  # tool_call_id -> 尝试次数
         self._layer2_max_attempts = 2
 
     async def run(self, session: Session) -> Session:
-        """执行 ReAct 循环直到 FINISH 或 ERROR 状态。
+        """执行 ReAct 循环直到 FINISH_WAIT、FINISH 或 ERROR 状态。
 
         主循环根据 session.state 分发到 _handle_reason、
-        _handle_act 或 _handle_observe。总是在返回前
-        发布 SessionEnd。
+        _handle_act 或 _handle_observe。根据退出状态发布
+        round_end 或 session_end 事件。
 
         Args:
             session: 带有初始消息和 state=REASON 的 Session 对象。
 
         Returns:
-            相同的 Session 对象，现在处于 FINISH 或 ERROR 状态。
+            相同的 Session 对象，处于 FINISH_WAIT、FINISH 或 ERROR 状态。
         """
-        while session.state not in (AgentState.FINISH, AgentState.ERROR):
+        self._round_num += 1
+        round_start_steps = session.step_count
+
+        while session.state not in (AgentState.FINISH, AgentState.FINISH_WAIT, AgentState.ERROR):
             prev_state = session.state
             if session.state == AgentState.REASON:
                 await self._handle_reason(session)
@@ -128,18 +133,33 @@ class ReActFSM:
             if self.checkpoint_manager is not None:
                 self.checkpoint_manager.save(session)
 
-        # 返回前始终发布 SessionEnd
-        await self.bus.publish(
-            "session_end",
-            {
-                "event_type": "session_end",
-                "session_id": session.session_id,
-                "final_state": session.state.value,
-                "total_steps": session.step_count,
-                "exit_reason": self._exit_reason,
-            },
-        )
+        # 根据退出状态发布不同事件
+        if session.state == AgentState.FINISH_WAIT:
+            round_steps = session.step_count - round_start_steps
+            await self.bus.publish(
+                "round_end",
+                {
+                    "event_type": "round_end",
+                    "session_id": session.session_id,
+                    "round_num": self._round_num,
+                    "total_steps": round_steps,
+                    "token_usage": self._turn_token_usage,
+                },
+            )
+        else:
+            # FINISH 或 ERROR — 发布 session_end
+            await self.bus.publish(
+                "session_end",
+                {
+                    "event_type": "session_end",
+                    "session_id": session.session_id,
+                    "final_state": session.state.value,
+                    "total_steps": session.step_count,
+                    "exit_reason": self._exit_reason,
+                },
+            )
 
+        self._turn_token_usage = None
         return session
 
     # ── 状态处理程序 ──────────────────────────────────────────────────
@@ -148,11 +168,11 @@ class ReActFSM:
         """处理 REASON 状态：验证消息、检查预算、调用 LLM。
 
         转换：
-        - 有内容 + 无 tool_calls → FINISH（D-01）
+        - 有内容 + 无 tool_calls → FINISH_WAIT（Chat 模式多轮）
         - 有 tool_calls → ACT
         - ValidationError → ERROR
         - Exception → ERROR
-        - 预算"final"操作 → LLM 响应后转 FINISH
+        - 预算"final"操作 → LLM 响应后转 FINISH_WAIT
         """
         step_num = session.step_count + 1
 
@@ -275,8 +295,8 @@ class ReActFSM:
 
             # 确定下一个状态
             if action == "final":
-                # 预算耗尽：允许这次最终响应，然后强制 FINISH
-                session.state = AgentState.FINISH
+                # 预算耗尽：允许这次最终响应，然后强制 FINISH_WAIT
+                session.state = AgentState.FINISH_WAIT
                 transition = "REASON_to_FINISH"
                 self._exit_reason = "budget_exhausted"
                 await self.bus.publish(
@@ -291,7 +311,7 @@ class ReActFSM:
                 session.state = AgentState.ACT
                 transition = "REASON_to_ACT"
             else:
-                session.state = AgentState.FINISH
+                session.state = AgentState.FINISH_WAIT
                 transition = "REASON_to_FINISH"
 
             # 处理预算警告
@@ -327,6 +347,24 @@ class ReActFSM:
                 "token_usage": step_token_usage,
             },
         )
+
+        # 累加本轮 token 使用量
+        if step_token_usage is not None:
+            if self._turn_token_usage is None:
+                self._turn_token_usage = dict(step_token_usage)
+            else:
+                self._turn_token_usage["prompt_tokens"] = (
+                    self._turn_token_usage.get("prompt_tokens", 0)
+                    + step_token_usage.get("prompt_tokens", 0)
+                )
+                self._turn_token_usage["completion_tokens"] = (
+                    self._turn_token_usage.get("completion_tokens", 0)
+                    + step_token_usage.get("completion_tokens", 0)
+                )
+                self._turn_token_usage["total_tokens"] = (
+                    self._turn_token_usage.get("total_tokens", 0)
+                    + step_token_usage.get("total_tokens", 0)
+                )
 
     async def _handle_act(self, session: Session) -> None:
         """处理 ACT 状态：循环检测、权限检查、执行工具。

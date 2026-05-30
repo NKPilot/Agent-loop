@@ -60,6 +60,19 @@ export interface SessionEndEvent extends EventBase {
   exit_reason: string;
 }
 
+export interface UserMessageEvent extends EventBase {
+  event_type: "user_message";
+  round_num: number;
+  content: string;
+}
+
+export interface RoundEndEvent extends EventBase {
+  event_type: "round_end";
+  round_num: number;
+  total_steps: number;
+  token_usage?: TokenUsage | null;
+}
+
 // ── Inner streaming events ────────────────────────────────────────────
 
 export interface LLMTokenEvent extends EventBase {
@@ -243,6 +256,8 @@ export type Event =
   | StepStartEvent
   | StepEndEvent
   | SessionEndEvent
+  | UserMessageEvent
+  | RoundEndEvent
   | LLMTokenEvent
   | LLMContentDoneEvent
   | ToolCallStartEvent
@@ -271,6 +286,8 @@ export const EVENT_TYPE_MAP: Record<string, string> = {
   step_start: "Step Start",
   step_end: "Step End",
   session_end: "Session End",
+  user_message: "User Message",
+  round_end: "Round End",
   llm_token: "Thinking",
   llm_content_done: "Thinking Done",
   tool_call_start: "Tool Call Start",

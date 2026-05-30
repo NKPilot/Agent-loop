@@ -49,6 +49,23 @@ class SessionEnd(EventBase):
     exit_reason: str
 
 
+class UserMessage(EventBase):
+    """当用户通过 POST /messages 发送消息时发布，用于前端轮次分组。"""
+
+    event_type: Literal["user_message"] = "user_message"
+    round_num: int
+    content: str
+
+
+class RoundEnd(EventBase):
+    """Agent 完成一轮对话（进入 FINISH_WAIT）时发布。"""
+
+    event_type: Literal["round_end"] = "round_end"
+    round_num: int
+    total_steps: int
+    token_usage: dict | None = None
+
+
 # ── 内部流式事件 ──────────────────────────────────────────────────────
 
 
@@ -298,6 +315,8 @@ Event = Annotated[
     StepStart
     | StepEnd
     | SessionEnd
+    | UserMessage
+    | RoundEnd
     | LLMToken
     | LLMContentDone
     | ToolCallStart

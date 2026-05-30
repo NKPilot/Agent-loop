@@ -26,11 +26,14 @@ from fastapi import APIRouter, HTTPException, Request
 
 from loopai.api.schemas import (
     ConfirmRequest,
+    SendMessageRequest,
+    SendMessageResponse,
     StartSessionRequest,
     StartSessionResponse,
 )
 from loopai.config import load_config
 from loopai.main import create_agent_components
+from loopai.session.context import AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -41,50 +44,93 @@ router = APIRouter()
 
 
 async def _run_and_cleanup(session, fsm, bus, app):
-    """运行 FSM 循环并在完成时发布 session_end 事件。
+    """多轮对话运行器。
 
-    用 try/except 包装 fsm.run() 以优雅地处理错误。
-    在 FSM 完成后（或出错后），如果 FSM 尚未发布 session_end
-    事件，则发布该事件，并在 active_sessions 中将会话标记为已完成。
+    循环调用 fsm.run()，每次运行到 FINISH_WAIT 后通过 asyncio.Queue
+    等待新消息。收到新消息后添加回 Session 并继续下一轮。
+    收到 None 关闭信号或 ERROR 时终止并发布 session_end。
     """
     session_id = session.session_id
+    session_end_published = False
+
     try:
-        try:
-            await fsm.run(session)
-        except Exception as exc:
-            logger.error(
-                "Agent session %s failed: %s: %s",
-                session_id,
-                type(exc).__name__,
-                exc,
-            )
-            # 发布错误事件，以便 SSE 消费者可以观察到失败
-            await bus.publish(
-                "error",
-                {
-                    "event_type": "error",
-                    "session_id": session_id,
-                    "error_type": type(exc).__name__,
-                    "error_message": str(exc),
-                    "step_num": session.step_count,
-                },
-            )
-            # 发布带错误状态的 session_end
+        while True:
+            try:
+                await fsm.run(session)
+            except Exception as exc:
+                logger.error(
+                    "Agent session %s failed: %s: %s",
+                    session_id,
+                    type(exc).__name__,
+                    exc,
+                )
+                await bus.publish(
+                    "error",
+                    {
+                        "event_type": "error",
+                        "session_id": session_id,
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                        "step_num": session.step_count,
+                    },
+                )
+                await bus.publish(
+                    "session_end",
+                    {
+                        "event_type": "session_end",
+                        "session_id": session_id,
+                        "final_state": "ERROR",
+                        "total_steps": session.step_count,
+                        "exit_reason": f"unhandled_error: {type(exc).__name__}",
+                    },
+                )
+                session_end_published = True
+                break
+
+            if session.state == AgentState.ERROR:
+                # fsm.run() 已发布 session_end
+                session_end_published = True
+                break
+
+            if session.state == AgentState.FINISH:
+                # fsm.run() 已发布 session_end
+                session_end_published = True
+                break
+
+            if session.state == AgentState.FINISH_WAIT:
+                # 等待下一条用户消息
+                queue = app.state.session_queues.get(session_id)
+                if queue is None:
+                    break
+                new_message = await queue.get()
+
+                if new_message is None:
+                    # 关闭信号——结束会话
+                    break
+
+                # 添加用户消息并继续循环
+                session.add_message("user", content=new_message)
+                session.state = AgentState.REASON
+
+    finally:
+        # 仅在 fsm.run() 未发布 session_end 时补发
+        if not session_end_published:
             await bus.publish(
                 "session_end",
                 {
                     "event_type": "session_end",
                     "session_id": session_id,
-                    "final_state": "ERROR",
+                    "final_state": session.state.value,
                     "total_steps": session.step_count,
-                    "exit_reason": f"unhandled_error: {type(exc).__name__}",
+                    "exit_reason": "chat_ended",
                 },
             )
-    finally:
-        # 在 active_sessions 中标记为已完成
+
+        # 清理
         if session_id in app.state.active_sessions:
             entry = app.state.active_sessions[session_id]
-            entry["status"] = "error" if session.state.value == "ERROR" else "completed"
+            entry["status"] = "completed"
+        app.state.session_queues.pop(session_id, None)
 
 
 # ── 端点 ────────────────────────────────────────────────────────────────
@@ -123,17 +169,22 @@ async def start_session(body: StartSessionRequest, request: Request):
     logger_obj = components["logger"]
     permission_guard = components["permission_guard"]
 
+    # 注册会话消息队列（多轮对话用）
+    app_state = request.app
+    app_state.session_queues[session.session_id] = asyncio.Queue()
+
     # 启动 JSONL 日志记录器（Web 路径下唯一需要的消费者）
     logger_task = await logger_obj.start(bus)
 
     # 将 FSM 作为后台任务启动——非阻塞，以便立即向前端返回 session_id
     agent_task = asyncio.create_task(
-        _run_and_cleanup(session, fsm, bus, request.app)
+        _run_and_cleanup(session, fsm, bus, app_state)
     )
 
     # 在活动会话中注册，用于生命周期管理
-    request.app.state.active_sessions[session.session_id] = {
+    app_state.active_sessions[session.session_id] = {
         "session": session,
+        "fsm": fsm,
         "task": agent_task,
         "logger_task": logger_task,
         "permission_guard": permission_guard,
@@ -205,3 +256,80 @@ async def confirm_session(
         "approved": body.approved,
         "responded": True,
     }
+
+
+@router.post("/sessions/{session_id}/messages")
+async def send_message(session_id: str, body: SendMessageRequest, request: Request):
+    """向活跃会话发送新消息。
+
+    将消息内容放入会话的 asyncio.Queue，FSM 的 _run_and_cleanup
+    循环从中取出后处理。同时发布 user_message 事件供 SSE 推送到前端。
+
+    Args:
+        session_id: 目标会话 ID。
+        body: 包含 content 字段的请求体。
+        request: FastAPI 请求对象。
+
+    Returns:
+        SendMessageResponse 包含 session_id 和 round_num。
+        如果会话未找到或已结束返回 404。
+    """
+    active = request.app.state.active_sessions
+    queues = request.app.state.session_queues
+
+    if session_id not in active:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+
+    entry = active[session_id]
+    session = entry["session"]
+
+    # 只允许在 FINISH_WAIT 或初始 REASON 状态下发送消息
+    if session.state not in (AgentState.FINISH_WAIT, AgentState.REASON):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session is in state '{session.state.value}', cannot accept messages",
+        )
+
+    if session_id not in queues:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No message queue for session '{session_id}'",
+        )
+
+    # 发布 user_message 事件供 SSE 推流
+    round_num = getattr(entry.get("fsm"), "_round_num", 0) + 1  # 下一轮的编号
+    await request.app.state.bus.publish(
+        "user_message",
+        {
+            "event_type": "user_message",
+            "session_id": session_id,
+            "round_num": round_num,
+            "content": body.content,
+        },
+    )
+
+    # 放入队列 — _run_and_cleanup 会取出并处理
+    await queues[session_id].put(body.content)
+
+    return SendMessageResponse(
+        session_id=session_id,
+        round_num=round_num,
+    )
+
+
+@router.post("/sessions/{session_id}/stop")
+async def stop_session(session_id: str, request: Request):
+    """结束一个活跃会话。
+
+    向会话消息队列发送 None 关闭信号，_run_and_cleanup 收到后
+    发布 session_end 并清理资源。
+    """
+    queues = request.app.state.session_queues
+    if session_id not in queues:
+        raise HTTPException(
+            status_code=404, detail=f"Session '{session_id}' not found or already ended"
+        )
+
+    await queues[session_id].put(None)
+
+    return {"session_id": session_id, "stopped": True}
