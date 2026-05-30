@@ -1,5 +1,6 @@
 import { memo, useRef, useState, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { Event, ToolCallInfo } from "@/lib/eventTypes";
 import { fixMarkdownTable } from "@/utils/markdown";
 import { useUIStore } from "@/stores/uiStore";
@@ -188,7 +189,7 @@ const StepCard = memo(function StepCard({ step, toolCalls, isLastActive }: StepC
         {/* Reasoning text */}
         {displayText && (
           <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-            <ReactMarkdown>{fixMarkdownTable(displayText)}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{fixMarkdownTable(displayText)}</ReactMarkdown>
             {isStreaming && (
               <span className="inline-block w-0.5 h-4 bg-foreground ml-0.5 align-middle animate-pulse" />
             )}
