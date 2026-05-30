@@ -77,9 +77,21 @@ def create_agent_components(
     """
     actual_max = max_steps_override if max_steps_override is not None else config.max_steps
 
+    # ── Wire up tool system first (needed for system prompt) ────────────
+    registry = ToolRegistry()
+    executor = ToolExecutor(registry)
+    permission_guard = PermissionGuard(
+        bus, confirmation_timeout=config.confirmation_timeout
+    )
+    bash_fn = create_bash_tool(working_dir=config.tool_working_dir)
+    registry.register(bash_fn)
+    from loopai.tools.disk_tools import register_disk_tools
+    register_disk_tools(registry, working_dir=config.tool_working_dir)
+    from loopai.tools.prompt_builder import build_system_prompt
+    system_prompt = build_system_prompt(registry, working_dir=config.tool_working_dir)
+
     # ── Create session with initial messages ──────────────────────────
     session = Session(config=config)
-
     session.add_message("system", content=system_prompt)
     session.add_message("user", content=prompt)
 
@@ -88,23 +100,6 @@ def create_agent_components(
     budget_guard = BudgetGuard(max_steps=actual_max)
     loop_detector = LoopDetector()
     message_validator = MessageValidator()
-
-    # ── Wire up tool system (Phase 2) ──────────────────────────────────
-    registry = ToolRegistry()
-    executor = ToolExecutor(registry)
-    permission_guard = PermissionGuard(
-        bus, confirmation_timeout=config.confirmation_timeout
-    )
-
-    # Register Bash tool + disk tools
-    bash_fn = create_bash_tool(working_dir=config.tool_working_dir)
-    registry.register(bash_fn)
-    from loopai.tools.disk_tools import register_disk_tools
-    register_disk_tools(registry, working_dir=config.tool_working_dir)
-
-    # Generate system prompt from tool registry
-    from loopai.tools.prompt_builder import build_system_prompt
-    system_prompt = build_system_prompt(registry, working_dir=config.tool_working_dir)
 
     # ── Wire up context management (Phase 3) ──────────────────────────
     token_counter = TokenCounter()
