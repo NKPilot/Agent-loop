@@ -4,6 +4,7 @@ import { useUIStore } from "@/stores/uiStore";
 import SessionList from "@/components/SessionList";
 import AgentTimeline from "@/components/AgentTimeline";
 import ConnectionStatus from "@/components/ConnectionStatus";
+import ToolDetail from "@/components/ToolDetail";
 
 // ── App ───────────────────────────────────────────────────────────────
 
@@ -75,15 +76,7 @@ function App() {
             <div className="border-b border-border px-4 py-3">
               <h2 className="text-[20px] font-semibold leading-tight">Tool Detail</h2>
             </div>
-            <div className="flex flex-1 items-center justify-center p-6">
-              <div className="text-center space-y-2">
-                <p className="text-sm font-medium text-foreground">Select a tool call</p>
-                <p className="text-xs text-muted-foreground">
-                  Click any tool call in the timeline to view its arguments, result,
-                  and performance metrics.
-                </p>
-              </div>
-            </div>
+            <ToolDetail />
           </aside>
         </main>
       </div>
