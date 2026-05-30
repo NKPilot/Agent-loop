@@ -65,6 +65,20 @@ class DeleteResponse(BaseModel):
     deleted: bool
 
 
+class SendMessageRequest(BaseModel):
+    """POST /api/sessions/{id}/messages 的请求体。"""
+
+    content: str
+
+
+class SendMessageResponse(BaseModel):
+    """POST /api/sessions/{id}/messages 的响应。"""
+
+    message: str = "Message queued"
+    session_id: str
+    round_num: int
+
+
 __all__ = [
     "SessionSummary",
     "SessionListResponse",
@@ -73,4 +87,6 @@ __all__ = [
     "StartSessionResponse",
     "ConfirmRequest",
     "DeleteResponse",
+    "SendMessageRequest",
+    "SendMessageResponse",
 ]
