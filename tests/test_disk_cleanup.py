@@ -58,7 +58,7 @@ class TestDiskDf:
     @pytest.mark.asyncio
     async def test_df_returns_filesystem_header(self, executor):
         """disk_df 应返回包含 'Filesystem' 列头的输出。"""
-        result = await executor.execute("disk.df", {})
+        result = await executor.execute("disk_df", {})
         assert not result.is_error, f"df failed: {result.error_message}"
         assert "Filesystem" in result.data
 
@@ -69,14 +69,14 @@ class TestDiskDu:
     @pytest.mark.asyncio
     async def test_du_returns_sandbox_path(self, executor):
         """disk_du 应返回包含沙箱路径和大小信息的输出。"""
-        result = await executor.execute("disk.du", {"directory": SANDBOX, "max_depth": 2})
+        result = await executor.execute("disk_du", {"directory": SANDBOX, "max_depth": 2})
         assert not result.is_error, f"du failed: {result.error_message}"
         assert SANDBOX in result.data
 
     @pytest.mark.asyncio
     async def test_du_outside_sandbox_returns_error(self, executor):
         """disk_du 的 directory 超出沙箱范围时应返回错误。"""
-        result = await executor.execute("disk.du", {"directory": "/etc", "max_depth": 1})
+        result = await executor.execute("disk_du", {"directory": "/etc", "max_depth": 1})
         assert result.is_error
         assert "沙箱" in result.error_message
 
@@ -88,7 +88,7 @@ class TestDiskFind:
     async def test_find_large_files(self, executor):
         """disk_find 查找 >10M 文件应返回预设大文件。"""
         result = await executor.execute(
-            "disk.find",
+            "disk_find",
             {"directory": SANDBOX, "min_size": "+10M", "file_type": "f"},
         )
         assert not result.is_error, f"find failed: {result.error_message}"
@@ -106,7 +106,7 @@ class TestDiskRm:
         target = f"{SANDBOX}/tmp/temp_20260101.tmp"
         assert os.path.exists(target), f"预设文件不存在: {target}"
 
-        result = await executor.execute("disk.rm", {"target": target, "recursive": False})
+        result = await executor.execute("disk_rm", {"target": target, "recursive": False})
         assert not result.is_error, f"rm failed: {result.error_message}"
         assert not os.path.exists(target), f"文件应已被删除: {target}"
         assert "已删除" in result.data
@@ -115,7 +115,7 @@ class TestDiskRm:
     async def test_rm_outside_sandbox_raises_guard(self, executor):
         """disk_rm 尝试删除沙箱外的路径应抛出 GuardViolationError。"""
         result = await executor.execute(
-            "disk.rm", {"target": "/etc/hosts", "recursive": False}
+            "disk_rm", {"target": "/etc/hosts", "recursive": False}
         )
         assert result.is_error
         assert "沙箱" in result.error_message.lower() or "guard" in result.error_message.lower()
@@ -128,18 +128,18 @@ class TestFullFlow:
     async def test_full_diagnosis_cleanup_flow(self, registry, executor, event_bus):
         """模拟完整的磁盘诊断→定位→分析→确认→清理流程。"""
         # 1. 扫描磁盘
-        df_result = await executor.execute("disk.df", {})
+        df_result = await executor.execute("disk_df", {})
         assert not df_result.is_error
         assert "Filesystem" in df_result.data
 
         # 2. 定位大目录
-        du_result = await executor.execute("disk.du", {"directory": SANDBOX, "max_depth": 2})
+        du_result = await executor.execute("disk_du", {"directory": SANDBOX, "max_depth": 2})
         assert not du_result.is_error
         assert SANDBOX in du_result.data
 
         # 3. 筛选大文件
         find_result = await executor.execute(
-            "disk.find",
+            "disk_find",
             {"directory": SANDBOX, "min_size": "+10M", "file_type": "f"},
         )
         assert not find_result.is_error
@@ -147,7 +147,7 @@ class TestFullFlow:
         # 4. 确认后可删除临时文件
         target = f"{SANDBOX}/tmp/temp_20260115.tmp"
         assert os.path.exists(target)
-        rm_result = await executor.execute("disk.rm", {"target": target, "recursive": False})
+        rm_result = await executor.execute("disk_rm", {"target": target, "recursive": False})
         assert not rm_result.is_error
         assert "已删除" in rm_result.data
         assert not os.path.exists(target)
@@ -162,7 +162,7 @@ class TestFullFlow:
         guard = PermissionGuard(bus=event_bus, confirmation_timeout=0.5)
 
         session_id = "test-session-timeout"
-        tool_name = "disk.rm"
+        tool_name = "disk_rm"
         step_num = 3
         confirmation_id = f"{session_id}_{tool_name}_{step_num}"
 
@@ -188,7 +188,7 @@ class TestFullFlow:
         guard = PermissionGuard(bus=event_bus, confirmation_timeout=120.0)
 
         session_id = "test-session-approve"
-        tool_name = "disk.rm"
+        tool_name = "disk_rm"
         step_num = 5
         confirmation_id = f"{session_id}_{tool_name}_{step_num}"
 
@@ -218,7 +218,7 @@ class TestFullFlow:
         guard = PermissionGuard(bus=event_bus, confirmation_timeout=120.0)
 
         session_id = "test-session-deny"
-        tool_name = "disk.rm"
+        tool_name = "disk_rm"
         step_num = 7
         confirmation_id = f"{session_id}_{tool_name}_{step_num}"
 
@@ -245,7 +245,7 @@ class TestFullFlow:
         guard = PermissionGuard(bus=event_bus, confirmation_timeout=120.0)
 
         should_proceed, action = await guard.check(
-            tool_name="disk.df",
+            tool_name="disk_df",
             tool_args={},
             permission_level=PermissionLevel.SAFE,
             session_id="test-session",
@@ -263,7 +263,7 @@ class TestFullFlow:
 
         guard = PermissionGuard(bus=event_bus, confirmation_timeout=120.0)
         session_id = "test-reject-nginx"
-        tool_name = "disk.rm"
+        tool_name = "disk_rm"
         step_num = 4
         confirmation_id = f"{session_id}_{tool_name}_{step_num}"
 
