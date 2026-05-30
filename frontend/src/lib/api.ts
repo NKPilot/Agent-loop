@@ -94,6 +94,29 @@ export async function confirmCommand(
   return handleResponse<void>(response);
 }
 
+export async function sendMessage(
+  sessionId: string,
+  content: string
+): Promise<{ session_id: string; round_num: number }> {
+  const response = await fetch(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    }
+  );
+  return handleResponse<{ session_id: string; round_num: number }>(response);
+}
+
+export async function stopSession(sessionId: string): Promise<void> {
+  const response = await fetch(
+    `/api/sessions/${encodeURIComponent(sessionId)}/stop`,
+    { method: "POST" }
+  );
+  return handleResponse<void>(response);
+}
+
 export async function deleteSession(id: string): Promise<void> {
   const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",
