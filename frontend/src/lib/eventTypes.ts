@@ -31,6 +31,13 @@ export interface CostRates {
 
 export type SSEStatus = "connected" | "connecting" | "reconnecting" | "failed";
 
+// ── Round grouping ─────────────────────────────────────────────────────
+
+export interface RoundInfo {
+  round_num: number;
+  events: Event[];
+}
+
 // ── Base event ────────────────────────────────────────────────────────
 
 export interface EventBase {
