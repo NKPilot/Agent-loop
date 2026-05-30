@@ -1,10 +1,14 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useUIStore } from "@/stores/uiStore";
+import { useEventStore } from "@/stores/eventStore";
 import SessionList from "@/components/SessionList";
 import AgentTimeline from "@/components/AgentTimeline";
 import ConnectionStatus from "@/components/ConnectionStatus";
 import ToolDetail from "@/components/ToolDetail";
+import TokenUsageCard from "@/components/TokenUsageCard";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 // ── App ───────────────────────────────────────────────────────────────
 
@@ -12,6 +16,11 @@ function App() {
   const setActiveSession = useUIStore((s) => s.setActiveSession);
   const activeSessionId = useUIStore((s) => s.activeSessionId);
   const clearPendingConfirmation = useUIStore((s) => s.clearPendingConfirmation);
+  const eventsBySession = useEventStore((s) => s.eventsBySession);
+  const [activeTab, setActiveTab] = useState("timeline");
+
+  // Raw events data for the Raw Events tab
+  const rawEvents = activeSessionId ? (eventsBySession[activeSessionId] ?? []) : [];
 
   // ── Keyboard navigation ──────────────────────────────────────────────
 
@@ -25,6 +34,11 @@ function App() {
         }
         return;
       }
+
+      // Tab switching: t -> Timeline, u -> Token Usage, r -> Raw Events
+      if (e.key === "t") { setActiveTab("timeline"); return; }
+      if (e.key === "u") { setActiveTab("token-usage"); return; }
+      if (e.key === "r") { setActiveTab("raw-events"); return; }
 
       // j / ArrowDown: next session (placeholder — sessions list navigation
       // is handled within SessionList component via focus management)
@@ -63,12 +77,31 @@ function App() {
             <SessionList />
           </aside>
 
-          {/* Center panel: Agent Timeline — flex-1 */}
-          <section className="flex flex-1 flex-col bg-card">
+          {/* Center panel: Tabs (Timeline / Token Usage / Raw Events) — flex-1 */}
+          <section className="flex flex-1 flex-col bg-card overflow-hidden">
             <div className="border-b border-border px-4 py-3">
-              <h2 className="text-[20px] font-semibold leading-tight">Agent Timeline</h2>
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <TabsList>
+                  <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                  <TabsTrigger value="token-usage">Token Usage</TabsTrigger>
+                  <TabsTrigger value="raw-events">Raw Events</TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
-            <AgentTimeline />
+
+            <div className="flex flex-1 overflow-hidden">
+              {activeTab === "timeline" && <AgentTimeline />}
+              {activeTab === "token-usage" && <TokenUsageCard />}
+              {activeTab === "raw-events" && (
+                <ScrollArea className="h-full w-full">
+                  <pre className="p-4 text-xs font-mono whitespace-pre-wrap">
+                    {rawEvents.length === 0
+                      ? "No events yet."
+                      : rawEvents.map((event, i) => JSON.stringify(event, null, 2)).join("\n\n")}
+                  </pre>
+                </ScrollArea>
+              )}
+            </div>
           </section>
 
           {/* Right panel: Tool Detail — 360px */}
