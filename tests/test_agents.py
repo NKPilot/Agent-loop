@@ -337,3 +337,107 @@ def test_sub_agent_tool_isolation():
     main_registry.register(main_tool_func)
     assert main_registry.get("main_tool") is not None
     assert main_registry.get("sub_tool") is None
+
+
+# ── BIZ-03: 多 Agent 磁盘诊断集成 ──────────────────────────────────────────
+
+
+def test_biz03_agent_tools_in_registry():
+    """BIZ-03-1: create_agent_components 返回的 ToolRegistry 包含子 Agent Tool。
+
+    验证 disk_analyzer 和 disk_cleaner 作为 AgentTool 注册到主 ToolRegistry，
+    主 Agent 的 tool schemas 包含子 Agent 的 function 定义。
+    """
+    from loopai.events.bus import EventBus
+    from loopai.main import create_agent_components
+
+    config = _make_tool_config()
+    bus = EventBus()
+    components = create_agent_components(config, "诊断磁盘", bus)
+
+    registry = components["registry"]
+    session = components["session"]
+
+    # 验证 AgentTool 在 ToolRegistry 中
+    analyzer_meta = registry.get("disk_analyzer")
+    cleaner_meta = registry.get("disk_cleaner")
+    assert analyzer_meta is not None, "disk_analyzer AgentTool should be registered"
+    assert cleaner_meta is not None, "disk_cleaner AgentTool should be registered"
+
+    # 验证 tool schemas 包含子 Agent
+    schemas = registry.get_schemas()
+    schema_names = [s["function"]["name"] for s in schemas]
+    assert "disk_analyzer" in schema_names
+    assert "disk_cleaner" in schema_names
+
+    # 验证系统提示提及子 Agent
+    sys_prompt = session.messages[0]["content"]
+    assert "可用子 Agent" in sys_prompt
+    assert "disk_analyzer" in sys_prompt
+    assert "disk_cleaner" in sys_prompt
+
+
+@pytest.mark.asyncio
+async def test_biz03_multi_agent_disk_flow():
+    """BIZ-03-2: Mock 场景——先调用 disk_analyzer 分析，再调用 disk_cleaner 清理。
+
+    模拟多 Agent 磁盘诊断端到端流程：
+    1. 主 Agent 调用 disk_analyzer 获取分析结果
+    2. 将分析结果传给 disk_cleaner 执行清理
+    3. 两个子 Agent 均返回有效结果
+    """
+    from loopai.agents.disk_agents import disk_analyzer, disk_cleaner
+
+    config = _make_tool_config()
+    config.tool_working_dir = ".sandbox"
+
+    # 创建 AgentTool 实例
+    tool_a = AgentTool(agent_meta=disk_analyzer.__agent_meta__, config=config)
+    tool_c = AgentTool(agent_meta=disk_cleaner.__agent_meta__, config=config)
+
+    # Mock LLMClient 让子 Agent 快速返回
+    with patch("loopai.agents.tool.LLMClient") as MockClient:
+        instance = MockClient.return_value
+        instance.complete = AsyncMock(return_value={
+            "content": "磁盘分析完成：.sandbox 目录下共 3 个大文件（超过 10MB），"
+                       "建议清理 tmp/ 下的临时文件。",
+            "tool_calls": [],
+            "role": "assistant",
+            "token_usage": {"prompt_tokens": 50, "completion_tokens": 20,
+                           "total_tokens": 70},
+        })
+
+        # 步骤 1: 诊断
+        result_json = await tool_a.execute(path=".sandbox")
+        result_a = AgentToolResult.model_validate_json(result_json)
+
+        assert result_a.success, "disk_analyzer should succeed"
+        assert result_a.summary, "disk_analyzer should have summary"
+        assert "大文件" in result_a.summary or "完成" in result_a.summary
+        assert result_a.session_id, "disk_analyzer should have session_id"
+        assert result_a.steps >= 1, "disk_analyzer should have steps > 0"
+
+        # 步骤 2: 清理（基于诊断结果）
+        instance.complete = AsyncMock(return_value={
+            "content": "已清理 .sandbox/tmp/ 目录下的临时文件，释放 156MB 空间。",
+            "tool_calls": [],
+            "role": "assistant",
+            "token_usage": {"prompt_tokens": 30, "completion_tokens": 15,
+                           "total_tokens": 45},
+        })
+
+        result_json_c = await tool_c.execute(
+            target=".sandbox/tmp", recursive=True
+        )
+        result_c = AgentToolResult.model_validate_json(result_json_c)
+
+        assert result_c.success, "disk_cleaner should succeed"
+        assert result_c.summary, "disk_cleaner should have summary"
+        assert "清理" in result_c.summary
+        assert result_c.session_id, "disk_cleaner should have session_id"
+        assert result_c.steps >= 1, "disk_cleaner should have steps > 0"
+
+        # 验证两个子 Agent 有不同的 session_id
+        assert result_a.session_id != result_c.session_id, (
+            "Each sub-agent call should have unique session_id"
+        )
