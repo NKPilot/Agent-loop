@@ -175,6 +175,28 @@ export interface TokenWarningEvent extends EventBase {
   action: string;
 }
 
+// ── Agent-as-Tool events (Phase 6) ────────────────────────────────────
+
+export interface AgentCallStartEvent extends EventBase {
+  event_type: "agent_call_start";
+  step_num: number;
+  agent_name: string;
+  child_session_id: string;
+  tool_call_id: string;
+}
+
+export interface AgentCallEndEvent extends EventBase {
+  event_type: "agent_call_end";
+  step_num: number;
+  agent_name: string;
+  child_session_id: string;
+  summary: string;
+  tool_calls_count: number;
+  token_usage: TokenUsage | null;
+  steps: number;
+  success: boolean;
+}
+
 // ── Resilience events (Phase 4) ───────────────────────────────────────
 
 export interface CheckpointSavedEvent extends EventBase {
@@ -239,7 +261,9 @@ export type Event =
   | CircuitOpenedEvent
   | CircuitClosedEvent
   | FailureRegisteredEvent
-  | EscalationRequiredEvent;
+  | EscalationRequiredEvent
+  | AgentCallStartEvent
+  | AgentCallEndEvent;
 
 // ── Human-readable label map ──────────────────────────────────────────
 
@@ -266,4 +290,6 @@ export const EVENT_TYPE_MAP: Record<string, string> = {
   circuit_closed: "Circuit Closed",
   failure_registered: "Failure Registered",
   escalation_required: "Escalation Required",
+  agent_call_start: "Agent Call Start",
+  agent_call_end: "Agent Call End",
 };
