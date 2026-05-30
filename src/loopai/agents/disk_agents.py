@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 from loopai.agents.types import AgentMetadata
-from loopai.tools.decorator import _build_param_schema
+from loopai.tools.decorator import _build_param_schema, _build_validation_model
 from loopai.tools.disk_tools import register_disk_tools
 from loopai.tools.registry import ToolRegistry
 
@@ -85,6 +85,7 @@ def _define_agent(
         附加了 ``__agent_meta__`` 属性的函数。
     """
     param_schema = _build_param_schema(func)
+    validation_model = _build_validation_model(func)
     meta = AgentMetadata(
         name=name,
         description=description,
@@ -93,6 +94,7 @@ def _define_agent(
         max_steps=max_steps,
         timeout=timeout,
         param_schema=param_schema,
+        validation_model=validation_model,
     )
     func.__agent_meta__ = meta
     return func
