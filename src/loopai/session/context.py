@@ -30,6 +30,7 @@ class AgentState(str, Enum):
     ACT = "act"
     OBSERVE = "observe"
     FINISH = "finish"
+    FINISH_WAIT = "finish_wait"
     ERROR = "error"
 
 
