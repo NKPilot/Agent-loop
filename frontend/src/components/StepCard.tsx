@@ -1,13 +1,14 @@
 import { memo, useRef, useState, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Event, ToolCallInfo } from "@/lib/eventTypes";
+import type { Event, ToolCallInfo, AgentCallStartEvent } from "@/lib/eventTypes";
 import { fixMarkdownTable } from "@/utils/markdown";
 import { useUIStore } from "@/stores/uiStore";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { AlertTriangle, Wrench, Eye, Brain } from "lucide-react";
+import AgentCallCard from "@/components/AgentCallCard";
 
 // ── StepGroup type ───────────────────────────────────────────────────────
 
@@ -203,6 +204,25 @@ const StepCard = memo(function StepCard({ step, toolCalls, isLastActive }: StepC
             <span className="animate-pulse">...</span>
           </p>
         )}
+
+        {/* Agent call cards — multi-agent nested calls (above regular tool calls) */}
+        {(() => {
+          const childSessionIds = [
+            ...new Set(
+              step.events
+                .filter((e): e is AgentCallStartEvent => e.event_type === "agent_call_start")
+                .map((e) => e.child_session_id)
+            ),
+          ];
+          if (childSessionIds.length === 0) return null;
+          return (
+            <div className="flex flex-col gap-2 mt-1">
+              {childSessionIds.map((id) => (
+                <AgentCallCard key={id} events={step.events} childSessionId={id} />
+              ))}
+            </div>
+          );
+        })()}
 
         {/* Inline tool call mini-cards */}
         {inlineToolCalls.length > 0 && (
