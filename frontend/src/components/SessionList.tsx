@@ -214,7 +214,11 @@ function SessionListSkeleton() {
 
 // ── SessionList ──────────────────────────────────────────────────────────
 
-function SessionList() {
+interface SessionListProps {
+  onSelect?: (sessionId: string) => void;
+}
+
+function SessionList({ onSelect }: SessionListProps) {
   const [search, setSearch] = useState("");
   const activeSessionId = useUIStore((s) => s.activeSessionId);
   const setActiveSession = useUIStore((s) => s.setActiveSession);
@@ -232,8 +236,9 @@ function SessionList() {
   const handleSelectSession = useCallback(
     (id: string) => {
       setActiveSession(id);
+      onSelect?.(id);
     },
-    [setActiveSession]
+    [setActiveSession, onSelect]
   );
 
   const filteredSessions = sessions
