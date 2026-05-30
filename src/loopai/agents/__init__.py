@@ -16,6 +16,7 @@
 
 from loopai.agents.decorator import agent, get_default_registry
 from loopai.agents.registry import AgentRegistry
+from loopai.agents.tool import AgentTool
 from loopai.agents.types import AgentMetadata, AgentToolResult
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "agent",
     "AgentRegistry",
     "get_default_registry",
+    "AgentTool",
 ]

@@ -85,6 +85,8 @@ def agent(
             tool_registry=tool_registry,
             max_steps=max_steps,
             timeout=timeout,
+            param_schema=param_schema,
+            validation_model=validation_model,
         )
 
         # 构建参数名到位置索引的映射
