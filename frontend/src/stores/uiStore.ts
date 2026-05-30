@@ -20,7 +20,7 @@ export interface UIState {
   sseStatus: SSEStatus;
   sseRetryCount: number;
 
-  setActiveSession: (id: string) => void;
+  setActiveSession: (id: string | null) => void;
   selectToolCall: (id: string | null) => void;
   setPendingConfirmation: (event: ConfirmationRequiredEvent | null) => void;
   clearPendingConfirmation: () => void;
@@ -37,7 +37,7 @@ export const useUIStore = create<UIState>()((set) => ({
   sseStatus: "connecting",
   sseRetryCount: 0,
 
-  setActiveSession: (id: string) =>
+  setActiveSession: (id: string | null) =>
     set({ activeSessionId: id, selectedToolCallId: null }),
 
   selectToolCall: (id: string | null) =>

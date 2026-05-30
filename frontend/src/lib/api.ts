@@ -84,11 +84,11 @@ export async function confirmCommand(
   approved: boolean
 ): Promise<void> {
   const response = await fetch(
-    `/api/sessions/${encodeURIComponent(sessionId)}/confirm/${encodeURIComponent(confirmationId)}`,
+    `/api/sessions/${encodeURIComponent(sessionId)}/confirm`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approved }),
+      body: JSON.stringify({ confirmation_id: confirmationId, approved }),
     }
   );
   return handleResponse<void>(response);
