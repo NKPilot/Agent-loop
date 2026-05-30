@@ -11,6 +11,7 @@
 - [ ] **阶段 3: 上下文管理** - Token 计数、上下文压缩、追加式存储、溢出文件处理
 - [ ] **阶段 4: 韧性与恢复** - 检查点、循环检测升级、失败注册表、守卫管道、分层恢复、熔断器
 - [ ] **阶段 5: 可观测性与 Web 前端** - 事件总线、SSE 实时推流、React 前端面板、会话历史、交互式演示
+- [ ] **阶段 7: Chat 模式** - 对话式 Chat UI、多轮对话、FSM FINISH_WAIT 状态
 
 ## 阶段详情
 
@@ -97,7 +98,22 @@
 - [x] 05-04-PLAN.md -- Frontend Layout + Data Pipeline：三面板布局、TypeScript 事件类型、useSSE hook、Zustand stores
 - [x] 05-05-PLAN.md -- Agent Timeline + Session List：SessionList 组件、AgentTimeline+StepCard、ConnectionStatus、键盘导航
 - [x] 05-06-PLAN.md -- Tool Detail + Token/Cost + Confirmation：ToolDetail、TokenUsageCard+recharts、ConfirmationDialog（D-06）
-- [ ] 05-07-PLAN.md -- End-to-End Integration + Production：Start Agent 串联、StaticFiles 生产模式、BIZ-02 端到端验证
+- [x] 05-07-PLAN.md -- End-to-End Integration + Production：Start Agent 串联、StaticFiles 生产模式、BIZ-02 端到端验证
+
+### 阶段 7: Chat 模式
+**目标**: 将 loopAI 从任务模式改造为对话式 Chat 模式——底部输入框、消息气泡流、多轮对话、FSM FINISH_WAIT 状态
+**依赖**: 阶段 5, 阶段 6
+**需求**: CHAT-01, CHAT-02, CHAT-03, CHAT-04, CHAT-05
+**成功标准**（必须为真的条件）:
+  1. 用户可以看到纯对话式界面：标题栏 + 消息流 + 底部输入框
+  2. 用户发送消息后，Agent 在对话气泡中实时回复（含 Markdown 渲染）
+  3. Agent 回复中的工具调用可展开查看参数和结果
+  4. 一轮完成后会话保持活跃，用户可以立即发送下一条消息
+  5. 现有功能完整保留：Markdown 表格、确认弹窗、Token/成本追踪
+**计划**: 2 plans
+**Plans:**
+- [ ] 07-01-PLAN.md — 后端 FINISH_WAIT 状态 + 多轮对话 + 消息 API
+- [ ] 07-02-PLAN.md — 前端 Chat UI 布局 + 消息气泡 + 输入框
 
 ## 进度
 
@@ -106,5 +122,7 @@
 | 1. Agent 核心循环 | 5/5 | 完成 | - |
 | 2. 工具系统与业务验证 | 4/4 | 完成 | - |
 | 3. 上下文管理 | 3/3 | 完成 | 2026-05-28 |
-| 4. 韧性与恢复 | 0/3 | 进行中 | - |
-| 5. 可观测性与 Web 前端 | 6/7 | 进行中 | - |
+| 4. 韧性与恢复 | 3/3 | 完成 | - |
+| 5. 可观测性与 Web 前端 | 7/7 | 完成 | 2026-05-30 |
+| 6. Agent-as-Tool | 3/3 | 完成 | 2026-05-30 |
+| 7. Chat 模式 | 0/2 | 进行中 | - |
