@@ -1,8 +1,15 @@
 import { useEffect, useCallback, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useUIStore } from "@/stores/uiStore";
 import { useEventStore } from "@/stores/eventStore";
+import { useSessionEvents } from "@/hooks/useSessionEvents";
+import { startSession } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import SessionList from "@/components/SessionList";
 import AgentTimeline from "@/components/AgentTimeline";
 import ConnectionStatus from "@/components/ConnectionStatus";
@@ -19,6 +26,38 @@ function App() {
   const clearPendingConfirmation = useUIStore((s) => s.clearPendingConfirmation);
   const eventsBySession = useEventStore((s) => s.eventsBySession);
   const [activeTab, setActiveTab] = useState("timeline");
+
+  // ── Start Agent state and handler ─────────────────────────────────────
+  const queryClient = useQueryClient();
+  const [prompt, setPrompt] = useState("");
+  const [maxSteps, setMaxSteps] = useState(15);
+  const [isStarting, setIsStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+
+  // Connect SSE stream when an active session is set
+  useSessionEvents(activeSessionId);
+
+  const handleStartSession = useCallback(async () => {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+
+    setIsStarting(true);
+    setStartError(null);
+    try {
+      clearPendingConfirmation();
+      setActiveSession(null);
+      const { session_id } = await startSession(trimmed, maxSteps);
+      setActiveSession(session_id);
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      setPrompt("");
+    } catch (err) {
+      setStartError(
+        err instanceof Error ? err.message : "启动 agent 会话失败"
+      );
+    } finally {
+      setIsStarting(false);
+    }
+  }, [prompt, maxSteps, setActiveSession, clearPendingConfirmation, queryClient]);
 
   // Raw events data for the Raw Events tab
   const rawEvents = activeSessionId ? (eventsBySession[activeSessionId] ?? []) : [];
@@ -70,11 +109,50 @@ function App() {
 
         {/* Three-panel body */}
         <main className="flex flex-1 min-w-[1024px] max-md:flex-col">
-          {/* Left panel: Session List — 260px */}
+          {/* Left panel: Session List + Start Agent — 260px */}
           <aside className="flex w-[260px] shrink-0 flex-col border-r border-border bg-card">
             <div className="border-b border-border px-4 py-3">
               <h2 className="text-[20px] font-semibold leading-tight">Session List</h2>
             </div>
+
+            {/* Start Agent form */}
+            <div className="border-b border-border space-y-2 px-3 py-3">
+              <Input
+                placeholder="Enter your prompt for the agent..."
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                disabled={isStarting}
+                className="h-8 text-xs"
+              />
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  placeholder="Steps"
+                  value={maxSteps}
+                  onChange={(e) => setMaxSteps(Number(e.target.value))}
+                  disabled={isStarting}
+                  className="h-8 w-[72px] text-xs"
+                  min={1}
+                  max={200}
+                />
+                <Button
+                  size="sm"
+                  className="flex-1 h-8 text-xs"
+                  onClick={handleStartSession}
+                  disabled={isStarting || !prompt.trim()}
+                >
+                  {isStarting && <Loader2 className="size-3.5 animate-spin mr-1" />}
+                  Start Agent
+                </Button>
+              </div>
+              {startError && (
+                <Alert variant="destructive" className="py-2 px-3">
+                  <AlertTriangle className="size-3" />
+                  <AlertDescription className="text-xs">{startError}</AlertDescription>
+                </Alert>
+              )}
+            </div>
+
             <SessionList />
           </aside>
 
