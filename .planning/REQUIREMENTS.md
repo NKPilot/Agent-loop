@@ -58,22 +58,30 @@
 
 ## v2 需求
 
-延迟到后续版本。
+Agent-as-Tool——多 Agent 协作。
 
-### 高级特性
+### Agent-as-Tool 框架
 
-- **ADV-01**: 会话回放——在前端按步前进/后退回放历史 agent 会话
-- **ADV-02**: 人在回路通用暂停/恢复——危险操作之外也支持任意节点暂停
-- **ADV-03**: 类型化状态 + Reducer——取代 ad-hoc 消息列表
-- **ADV-04**: 工具推测执行——预执行可能的下一步工具调用（实验性）
-- **ADV-05**: 因果溯源 / Ablation 分析——衡量每个工具调用对最终结果的贡献
-- **ADV-06**: 工具 Fuzz 测试——自动发现工具调用的边界用例
+- [ ] **AGT-01**: AgentTool——将任意 Agent 封装为 `@tool`，主 Agent 可通过工具调用委托子 Agent
+- [ ] **AGT-02**: 子 Agent Session 隔离——每次子 Agent 调用创建独立 Session，上下文不污染主 Agent
+- [ ] **AGT-03**: 结果回传——子 Agent 完成后结构化返回结果（含摘要、工具调用记录、token 消耗）
+- [ ] **AGT-04**: 超时和预算控制——子 Agent 有独立的 step budget 和超时限制
+- [ ] **AGT-05**: 子 Agent 工具集——可配置每个子 Agent 的工具范围（不同于主 Agent）
 
-### 扩展
+### 业务验证
 
-- **EXT-01**: 多 LLM 提供商适配（Anthropic、Gemini 等）
-- **EXT-02**: 多 Agent 协作（Agent 作为工具调用模式）
-- **EXT-03**: 长期记忆 / 向量数据库
+- [ ] **BIZ-03**: 磁盘诊断多 Agent 演示——主 Agent 委托"磁盘分析 Agent"诊断 + 委托"清理 Agent"执行清理
+
+### Web 前端
+
+- [ ] **WEB-01**: 多 Agent 调用链可视化——Dashboard 展示主 Agent 和子 Agent 的嵌套调用关系
+- [ ] **WEB-02**: 子 Agent 会话可展开——点击子 Agent 调用可展开查看其完整时间线
+
+### 延期（v3+）
+
+- 会话回放、通用人在回路、类型化状态
+- 工具推测执行、Ablation 分析、Fuzz 测试
+- 多 LLM 提供商适配、长期记忆
 
 ## 不在范围内
 
