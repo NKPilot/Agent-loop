@@ -8,6 +8,7 @@ import AgentTimeline from "@/components/AgentTimeline";
 import ConnectionStatus from "@/components/ConnectionStatus";
 import ToolDetail from "@/components/ToolDetail";
 import TokenUsageCard from "@/components/TokenUsageCard";
+import ConfirmationDialog from "@/components/ConfirmationDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 // ── App ───────────────────────────────────────────────────────────────
@@ -112,6 +113,9 @@ function App() {
             <ToolDetail />
           </aside>
         </main>
+
+        {/* Confirmation Dialog (portal — renders to document.body) */}
+        <ConfirmationDialog />
       </div>
     </TooltipProvider>
   );
