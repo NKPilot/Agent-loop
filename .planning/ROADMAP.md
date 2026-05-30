@@ -112,8 +112,8 @@
   5. 现有功能完整保留：Markdown 表格、确认弹窗、Token/成本追踪
 **计划**: 2 plans
 **Plans:**
-- [ ] 07-01-PLAN.md — 后端 FINISH_WAIT 状态 + 多轮对话 + 消息 API
-- [ ] 07-02-PLAN.md — 前端 Chat UI 布局 + 消息气泡 + 输入框
+- [x] 07-01-PLAN.md — 后端 FINISH_WAIT 状态 + 多轮对话 + 消息 API
+- [x] 07-02-PLAN.md — 前端 Chat UI 布局 + 消息气泡 + 输入框
 
 ## 进度
 
