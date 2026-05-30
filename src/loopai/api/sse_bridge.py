@@ -54,7 +54,6 @@ async def event_stream(
                 seq_counter += 1
                 yield ServerSentEvent(
                     data=event,
-                    event=event.get("event_type", "unknown"),
                     id=str(seq_counter),
                     retry=3000,
                 )
@@ -64,12 +63,10 @@ async def event_stream(
             event = await queue.get()
             if event is None:  # shutdown sentinel from bus.shutdown()
                 break
-            # Cross-session isolation — only yield events for this session (T-05-02)
             if event.get("session_id") == session_id:
                 seq_counter += 1
                 yield ServerSentEvent(
                     data=event,
-                    event=event.get("event_type", "unknown"),
                     id=str(seq_counter),
                     retry=3000,
                 )
