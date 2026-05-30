@@ -1,21 +1,17 @@
-import { useEffect, useCallback, useMemo, useState } from "react";
+import { useEffect, useCallback, useMemo, useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { History, Plus, ChevronDown, Wrench, Send, Loader2 } from "lucide-react";
+import { History, Plus, Send, Loader2, ArrowDown } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useUIStore } from "@/stores/uiStore";
 import { useEventStore } from "@/stores/eventStore";
 import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { startSession, sendMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import ConnectionStatus from "@/components/ConnectionStatus";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
 import SessionList from "@/components/SessionList";
-import { fixMarkdownTable } from "@/utils/markdown";
-import { formatTokens, formatCost, calculateCost } from "@/lib/costCalculator";
-import type { Event, UserMessageEvent, ToolCallInfo, TokenUsage } from "@/lib/eventTypes";
+import StepCard, { type StepGroup, groupEventsByStep } from "@/components/StepCard";
+import type { Event, UserMessageEvent } from "@/lib/eventTypes";
 
 // ── Round display type ──────────────────────────────────────────────────
 
@@ -23,52 +19,7 @@ type RoundDisplay = {
   round_num: number;
   userMessage: UserMessageEvent | null;
   agentEvents: Event[];
-  toolCalls: ToolCallInfo[];
-  tokenUsage: TokenUsage | null;
 };
-
-function getAccumulatedText(events: Event[]): string {
-  return events
-    .filter((e): e is Event & { event_type: "llm_token"; content_delta: string } =>
-      e.event_type === "llm_token"
-    )
-    .map((e) => e.content_delta)
-    .join("");
-}
-
-function buildRound(
-  roundNum: number,
-  userMsg: UserMessageEvent | null,
-  events: Event[],
-  toolCalls: ToolCallInfo[]
-): RoundDisplay {
-  let promptTokens = 0, completionTokens = 0;
-  for (const e of events) {
-    if (e.event_type === "step_end" && (e as Event & { token_usage?: TokenUsage }).token_usage) {
-      const tu = (e as Event & { token_usage: TokenUsage }).token_usage;
-      promptTokens += tu.prompt_tokens;
-      completionTokens += tu.completion_tokens;
-    }
-  }
-  const cumulativeTokenUsage: TokenUsage | null =
-    promptTokens > 0 || completionTokens > 0
-      ? { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens }
-      : null;
-
-  const toolCallIds = new Set(
-    events.filter((e) => e.event_type === "tool_call_start")
-      .map((e) => (e as Event & { tool_call_id: string }).tool_call_id)
-  );
-  const roundToolCalls = toolCalls.filter((tc) => toolCallIds.has(tc.tool_call_id));
-
-  return {
-    round_num: roundNum,
-    userMessage: userMsg,
-    agentEvents: events,
-    toolCalls: roundToolCalls,
-    tokenUsage: cumulativeTokenUsage,
-  };
-}
 
 // ── App ────────────────────────────────────────────────────────────────
 
@@ -84,9 +35,11 @@ function App() {
   const clearPendingConfirmation = useUIStore((s) => s.clearPendingConfirmation);
 
   const [isSending, setIsSending] = useState(false);
-  const [expandedToolCall, setExpandedToolCall] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [startPrompt, setStartPrompt] = useState("");
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const streamEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Connect SSE stream when an active session is set
   useSessionEvents(activeSessionId);
@@ -96,7 +49,6 @@ function App() {
   const rounds = useMemo<RoundDisplay[]>(() => {
     if (!activeSessionId) return [];
     const events = eventsBySession[activeSessionId] ?? [];
-    const tc = toolCallsBySession[activeSessionId] ?? [];
 
     const result: RoundDisplay[] = [];
     let currentEvents: Event[] = [];
@@ -105,13 +57,13 @@ function App() {
     for (const event of events) {
       if (event.event_type === "user_message") {
         if (currentUserMsg || currentEvents.length > 0) {
-          result.push(buildRound(result.length + 1, currentUserMsg, currentEvents, tc));
+          result.push({ round_num: result.length + 1, userMessage: currentUserMsg, agentEvents: currentEvents });
         }
         currentUserMsg = event as UserMessageEvent;
         currentEvents = [];
       } else if (event.event_type === "round_end") {
         currentEvents.push(event);
-        result.push(buildRound(result.length + 1, currentUserMsg, currentEvents, tc));
+        result.push({ round_num: result.length + 1, userMessage: currentUserMsg, agentEvents: currentEvents });
         currentUserMsg = null;
         currentEvents = [];
       } else {
@@ -121,17 +73,16 @@ function App() {
 
     // Flush remaining events (active round, no round_end yet)
     if (currentUserMsg || currentEvents.length > 0) {
-      result.push(buildRound(result.length + 1, currentUserMsg, currentEvents, tc));
+      result.push({ round_num: result.length + 1, userMessage: currentUserMsg, agentEvents: currentEvents });
     }
 
     return result;
-  }, [eventsBySession, activeSessionId, toolCallsBySession]);
+  }, [eventsBySession, activeSessionId]);
 
   // ── Handlers ──────────────────────────────────────────────────────────
 
   const handleNewChat = useCallback(() => {
     setActiveSession(null);
-    setExpandedToolCall(null);
     setShowHistory(false);
   }, [setActiveSession]);
 
@@ -234,127 +185,114 @@ function App() {
     </div>
   );
 
+  // ── Auto-scroll ──────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (isAtBottom && streamEndRef.current) {
+      streamEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [rounds, isAtBottom]);
+
+  const handleScroll = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    setIsAtBottom(scrollBottom < 50);
+  }, []);
+
   // ── Message stream ───────────────────────────────────────────────────
 
   const messageStream = activeSessionId && (
-    <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-      {rounds.length === 0 && (
-        <div className="flex items-center justify-center h-full">
-          <p className="text-sm text-muted-foreground italic">
-            Waiting for agent response...
-          </p>
-        </div>
-      )}
-
-      {rounds.map((round) => {
-        const accumulatedText = getAccumulatedText(round.agentEvents);
-
-        return (
-          <div key={round.round_num} className="space-y-4">
-            {/* User message -- right aligned */}
-            {round.userMessage && (
-              <div className="flex justify-end">
-                <div className="max-w-[80%] rounded-2xl bg-primary px-4 py-2.5 text-primary-foreground">
-                  <p className="text-sm whitespace-pre-wrap">{round.userMessage.content}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Agent response -- left aligned */}
-            {round.agentEvents.length > 0 && (
-              <div className="flex justify-start">
-                <div className="max-w-[85%] rounded-2xl bg-card border border-border px-4 py-3">
-                  {/* Thinking text */}
-                  {accumulatedText && (
-                    <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {fixMarkdownTable(accumulatedText)}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-
-                  {/* Tool call cards -- expandable inline */}
-                  {round.toolCalls.length > 0 && (
-                    <div className="mt-2 space-y-1 border-t border-border pt-2">
-                      {round.toolCalls.map((tc) => (
-                        <div key={tc.tool_call_id}>
-                          <button
-                            className="flex items-center gap-2 w-full rounded-md border border-border px-2.5 py-1.5 text-left text-xs hover:bg-accent/50 transition-colors cursor-pointer"
-                            onClick={() =>
-                              setExpandedToolCall(
-                                expandedToolCall === tc.tool_call_id ? null : tc.tool_call_id
-                              )
-                            }
-                          >
-                            <Wrench className="size-3 text-muted-foreground shrink-0" />
-                            <span className="font-mono text-xs font-medium truncate flex-1">
-                              {tc.tool_name}
-                            </span>
-                            <Badge variant={tc.is_error ? "destructive" : "secondary"}>
-                              {tc.status}
-                            </Badge>
-                            <ChevronDown
-                              className={`size-3 transition-transform ${
-                                expandedToolCall === tc.tool_call_id ? "rotate-180" : ""
-                              }`}
-                            />
-                          </button>
-
-                          {/* Expandable details -- args + result */}
-                          {expandedToolCall === tc.tool_call_id && (
-                            <div className="ml-2 mt-1 p-2 rounded-md bg-muted/50 text-xs font-mono space-y-1">
-                              {tc.full_args && Object.keys(tc.full_args).length > 0 && (
-                                <div>
-                                  <p className="text-muted-foreground mb-0.5">Arguments:</p>
-                                  <pre className="whitespace-pre-wrap">
-                                    {JSON.stringify(tc.full_args, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-                              {tc.result && (
-                                <div>
-                                  <p className="text-muted-foreground mb-0.5">Result:</p>
-                                  <pre className="whitespace-pre-wrap">{tc.result}</pre>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Token info -- lightweight */}
-                  {round.tokenUsage && (
-                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground border-t border-border pt-2">
-                      <span>Tokens: {formatTokens(round.tokenUsage.total_tokens)}</span>
-                      <span>
-                        Cost: {formatCost(
-                          calculateCost(
-                            round.tokenUsage.prompt_tokens,
-                            round.tokenUsage.completion_tokens
-                          )
-                        )}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      {/* Loading indicator when agent is thinking */}
-      {isAgentThinking && (
-        <div className="flex justify-start">
-          <div className="rounded-2xl bg-card border border-border px-4 py-3">
+    <div
+      className="flex-1 overflow-y-auto px-4 py-6"
+      ref={scrollContainerRef}
+      onScroll={handleScroll}
+    >
+      <div className="max-w-3xl mx-auto space-y-8">
+        {rounds.length === 0 && (
+          <div className="flex items-center justify-center h-full py-20">
             <p className="text-sm text-muted-foreground italic">
-              Agent is thinking
-              <span className="animate-pulse">...</span>
+              Waiting for agent response...
             </p>
           </div>
-        </div>
+        )}
+
+        {rounds.map((round) => {
+          const roundSteps = groupEventsByStep(round.agentEvents);
+          const toolCallsForSession = activeSessionId
+            ? (toolCallsBySession[activeSessionId] ?? [])
+            : [];
+
+          return (
+            <div key={round.round_num} className="space-y-4">
+              {/* User message -- right aligned */}
+              {round.userMessage && (
+                <div className="flex justify-end">
+                  <div className="max-w-[80%] rounded-2xl bg-primary px-4 py-2.5 text-primary-foreground">
+                    <p className="text-sm whitespace-pre-wrap">{round.userMessage.content}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Agent steps -- StepCard for each step in this round */}
+              {roundSteps.length > 0 && (
+                <div className="space-y-2">
+                  {roundSteps.map((step, idx) => (
+                    <StepCard
+                      key={step.stepNum}
+                      step={step}
+                      toolCalls={toolCallsForSession}
+                      isLastActive={
+                        idx === roundSteps.length - 1 && step.status === "active"
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Agent thinking indicator for rounds with no steps yet */}
+              {roundSteps.length === 0 && round.agentEvents.length > 0 && (
+                <div className="flex justify-start">
+                  <div className="rounded-2xl bg-card border border-border px-4 py-3">
+                    <p className="text-sm text-muted-foreground italic">
+                      Agent is thinking
+                      <span className="animate-pulse">...</span>
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Loading indicator when agent is thinking (no events yet) */}
+        {isAgentThinking && rounds.length === 0 && (
+          <div className="flex justify-start">
+            <div className="rounded-2xl bg-card border border-border px-4 py-3">
+              <p className="text-sm text-muted-foreground italic">
+                Agent is thinking
+                <span className="animate-pulse">...</span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div ref={streamEndRef} />
+      </div>
+
+      {/* "Scroll to bottom" floating button */}
+      {!isAtBottom && (
+        <Button
+          variant="secondary"
+          size="icon-sm"
+          className="absolute bottom-20 right-8 z-10 shadow-md rounded-full"
+          onClick={() => {
+            streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            setIsAtBottom(true);
+          }}
+        >
+          <ArrowDown className="size-4" />
+        </Button>
       )}
     </div>
   );

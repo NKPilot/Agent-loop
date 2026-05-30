@@ -2,54 +2,10 @@ import { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { ArrowDown } from "lucide-react";
 import { useEventStore } from "@/stores/eventStore";
 import { useUIStore } from "@/stores/uiStore";
-import type { Event } from "@/lib/eventTypes";
-import StepCard, { type StepGroup } from "@/components/StepCard";
+import StepCard, { type StepGroup, groupEventsByStep } from "@/components/StepCard";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-
-// ── Step grouping logic ──────────────────────────────────────────────────
-
-function groupEventsByStep(events: Event[]): StepGroup[] {
-  const stepMap = new Map<number, Event[]>();
-  let maxStepNum = 0;
-
-  for (const event of events) {
-    const stepNum =
-      "step_num" in event ? (event as unknown as { step_num: number }).step_num : 0;
-    if (stepNum > 0) {
-      if (!stepMap.has(stepNum)) {
-        stepMap.set(stepNum, []);
-      }
-      stepMap.get(stepNum)!.push(event);
-      maxStepNum = Math.max(maxStepNum, stepNum);
-    }
-  }
-
-  const groups: StepGroup[] = [];
-  for (const [stepNum, stepEvents] of stepMap) {
-    const hasStepEnd = stepEvents.some((e) => e.event_type === "step_end");
-    const hasError = stepEvents.some((e) => e.event_type === "error");
-    const isActive = stepNum === maxStepNum && !hasStepEnd;
-
-    let status: StepGroup["status"];
-    if (hasError) {
-      status = "error";
-    } else if (isActive) {
-      status = "active";
-    } else if (hasStepEnd) {
-      status = "completed";
-    } else {
-      status = "pending";
-    }
-
-    groups.push({ stepNum, events: stepEvents, status });
-  }
-
-  // Sort by step number ascending
-  groups.sort((a, b) => a.stepNum - b.stepNum);
-  return groups;
-}
 
 // ── Loading skeleton ─────────────────────────────────────────────────────
 

@@ -170,7 +170,7 @@ async def start_session(body: StartSessionRequest, request: Request):
     permission_guard = components["permission_guard"]
 
     # 注册会话消息队列（多轮对话用）
-    app_state = request.app
+    app_state = request.app.state
     app_state.session_queues[session.session_id] = asyncio.Queue()
 
     # 启动 JSONL 日志记录器（Web 路径下唯一需要的消费者）
@@ -178,7 +178,7 @@ async def start_session(body: StartSessionRequest, request: Request):
 
     # 将 FSM 作为后台任务启动——非阻塞，以便立即向前端返回 session_id
     agent_task = asyncio.create_task(
-        _run_and_cleanup(session, fsm, bus, app_state)
+        _run_and_cleanup(session, fsm, bus, request.app)
     )
 
     # 在活动会话中注册，用于生命周期管理

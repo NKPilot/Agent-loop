@@ -17,6 +17,10 @@ def event_bus():
 def test_client():
     """Return a FastAPI TestClient for API endpoint testing."""
     app = create_app()
+    # Manually initialize state (lifespan may not run with TestClient)
+    app.state.bus = EventBus()
+    app.state.active_sessions = {}
+    app.state.session_queues = {}
     return TestClient(app)
 
 

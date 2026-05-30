@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from loopai.api.app import create_app
 from loopai.events.bus import EventBus
+from loopai.state_machine.fsm import AgentState
 from loopai.state_machine.guards import PermissionGuard
 
 
@@ -23,17 +24,21 @@ class _MockSession:
 
     def __init__(self, session_id: str = "test-session-id"):
         self.session_id = session_id
-        self.state = MagicMock()
-        self.state.value = "REASON"
+        self.state = AgentState.REASON
         self.step_count = 0
         self.messages = []
 
+    def add_message(self, role, content):
+        """Mock add_message."""
+        self.messages.append({"role": role, "content": content})
+
 
 class _MockFSM:
-    """Mock FSM that does nothing (no LLM calls)."""
+    """Mock FSM that immediately finishes (no LLM calls)."""
 
     async def run(self, session):
-        """Simulate FSM execution as a no-op."""
+        """Simulate FSM execution — transition to FINISH so _run_and_cleanup exits."""
+        session.state = AgentState.FINISH
         return session
 
 
@@ -49,7 +54,7 @@ class _MockLogger:
         pass
 
 
-def _create_mock_components(config, prompt, bus):
+def _create_mock_components(config, prompt, bus, max_steps_override=None):
     """Mock implementation of create_agent_components for testing."""
     session = _MockSession()
     return {
@@ -62,11 +67,11 @@ def _create_mock_components(config, prompt, bus):
     }
 
 
-def _make_test_app():
-    """Create a test app with mock components wired in."""
-    app = create_app()
-    # Pre-create a bus so we can use it for mock PermissionGuard
-    return app
+def _init_app_state(app):
+    """Initialize app.state the way the lifespan would (needed for tests)."""
+    app.state.bus = EventBus()
+    app.state.active_sessions = {}
+    app.state.session_queues = {}
 
 
 # ── Test 1: Start session returns session_id (UUID format) ──────────────
@@ -75,7 +80,7 @@ def _make_test_app():
 def test_start_session_returns_session_id():
     """POST /api/sessions/start returns 200 with a session_id in UUID format."""
     app = create_app()
-    # Set a fake API key env to avoid config validation failure
+    _init_app_state(app)
     with patch(
         "loopai.api.routes.control.load_config",
         return_value=MagicMock(
@@ -92,11 +97,11 @@ def test_start_session_returns_session_id():
         "loopai.api.routes.control.create_agent_components",
         side_effect=_create_mock_components,
     ):
-        client = TestClient(app)
-        response = client.post(
-            "/api/sessions/start",
-            json={"prompt": "echo hello", "max_steps": 1},
-        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/sessions/start",
+                json={"prompt": "echo hello", "max_steps": 1},
+            )
 
     assert response.status_code == 200
     data = response.json()
@@ -113,6 +118,7 @@ def test_start_session_returns_session_id():
 def test_start_session_with_prompt_and_max_steps():
     """POST /api/sessions/start agent runs and returns session_id."""
     app = create_app()
+    _init_app_state(app)
     with patch(
         "loopai.api.routes.control.load_config",
         return_value=MagicMock(
@@ -129,11 +135,11 @@ def test_start_session_with_prompt_and_max_steps():
         "loopai.api.routes.control.create_agent_components",
         side_effect=_create_mock_components,
     ):
-        client = TestClient(app)
-        response = client.post(
-            "/api/sessions/start",
-            json={"prompt": "What is 1+1?", "max_steps": 3},
-        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/sessions/start",
+                json={"prompt": "What is 1+1?", "max_steps": 3},
+            )
 
     assert response.status_code == 200
     data = response.json()
@@ -147,11 +153,12 @@ def test_start_session_with_prompt_and_max_steps():
 def test_start_session_missing_prompt():
     """POST /api/sessions/start without prompt returns 422."""
     app = create_app()
-    client = TestClient(app)
-    response = client.post(
-        "/api/sessions/start",
-        json={"max_steps": 3},  # missing "prompt"
-    )
+    _init_app_state(app)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/start",
+            json={"max_steps": 3},  # missing "prompt"
+        )
 
     assert response.status_code == 422
 
@@ -172,17 +179,19 @@ def test_confirm_approve():
     guard._pending[confirmation_id] = pending_event
     guard._results[confirmation_id] = False  # Will be overwritten by respond()
 
-    # Register in active_sessions
-    app.state.active_sessions[session_id] = {
-        "session": _MockSession(session_id),
-        "permission_guard": guard,
-    }
+    with TestClient(app) as client:
+        # State must be set AFTER lifespan startup runs
+        app.state.bus = bus
+        app.state.active_sessions[session_id] = {
+            "session": _MockSession(session_id),
+            "permission_guard": guard,
+        }
+        app.state.session_queues = {}
 
-    client = TestClient(app)
-    response = client.post(
-        f"/api/sessions/{session_id}/confirm",
-        json={"confirmation_id": confirmation_id, "approved": True},
-    )
+        response = client.post(
+            f"/api/sessions/{session_id}/confirm",
+            json={"confirmation_id": confirmation_id, "approved": True},
+        )
 
     assert response.status_code == 200
     data = response.json()
@@ -212,17 +221,18 @@ def test_confirm_deny():
     pending_event = asyncio.Event()
     guard._pending[confirmation_id] = pending_event
 
-    # Register in active_sessions
-    app.state.active_sessions[session_id] = {
-        "session": _MockSession(session_id),
-        "permission_guard": guard,
-    }
+    with TestClient(app) as client:
+        app.state.bus = bus
+        app.state.active_sessions[session_id] = {
+            "session": _MockSession(session_id),
+            "permission_guard": guard,
+        }
+        app.state.session_queues = {}
 
-    client = TestClient(app)
-    response = client.post(
-        f"/api/sessions/{session_id}/confirm",
-        json={"confirmation_id": confirmation_id, "approved": False},
-    )
+        response = client.post(
+            f"/api/sessions/{session_id}/confirm",
+            json={"confirmation_id": confirmation_id, "approved": False},
+        )
 
     assert response.status_code == 200
     data = response.json()
@@ -242,11 +252,11 @@ def test_confirm_deny():
 def test_confirm_nonexistent_session():
     """POST /api/sessions/{id}/confirm for unknown session returns 404."""
     app = create_app()
-    client = TestClient(app)
-
-    response = client.post(
-        "/api/sessions/nonexistent-session/confirm",
-        json={"confirmation_id": "nonexistent_bash_1", "approved": True},
-    )
+    _init_app_state(app)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sessions/nonexistent-session/confirm",
+            json={"confirmation_id": "nonexistent_bash_1", "approved": True},
+        )
 
     assert response.status_code == 404
