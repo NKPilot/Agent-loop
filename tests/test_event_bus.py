@@ -126,7 +126,7 @@ async def test_bounded_queue_backpressure(event_bus):
         await event_bus.publish("test_topic", {"event_type": "test_topic", "seq": 2})
         # Check warning was issued
         assert len(w) == 1
-        assert "dropping event" in str(w[0].message).lower() or "dropping" in str(
+        assert "丢弃" in str(w[0].message) or "dropping" in str(
             w[0].message
         ).lower()
 
@@ -135,7 +135,7 @@ async def test_bounded_queue_backpressure(event_bus):
 async def test_invalid_event_data(event_bus):
     """Non-JSON-serializable data raises TypeError."""
     # A set is not JSON-serializable
-    with pytest.raises(TypeError, match="JSON-serializable"):
+    with pytest.raises(TypeError, match="序列化"):
         await event_bus.publish(
             "test_topic", {"event_type": "test_topic", "data": {1, 2, 3}}
         )
@@ -144,5 +144,5 @@ async def test_invalid_event_data(event_bus):
 @pytest.mark.asyncio
 async def test_event_type_mismatch(event_bus):
     """Publishing with mismatched event_type raises ValueError."""
-    with pytest.raises(ValueError, match="does not match"):
+    with pytest.raises(ValueError, match="不匹配"):
         await event_bus.publish("step_start", {"event_type": "step_end"})

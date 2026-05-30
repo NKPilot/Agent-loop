@@ -206,6 +206,6 @@ class TestContextCompressor:
 
         prompt = compressor._build_summary_prompt(messages)
 
-        assert "Summary:" in prompt
+        assert "摘要" in prompt
         assert "[user]: What's the weather?" in prompt
         assert "[assistant]: Sunny 22C" in prompt
