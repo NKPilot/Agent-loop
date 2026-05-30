@@ -89,6 +89,30 @@ def create_agent_components(
     from loopai.tools.prompt_builder import build_system_prompt
     system_prompt = build_system_prompt(registry, working_dir=config.tool_working_dir)
 
+    # ── 注册子 Agent（Agent-as-Tool, Phase 6）─────────────────────
+    from loopai.agents.disk_agents import disk_analyzer, disk_cleaner
+    from loopai.agents.registry import AgentRegistry
+    from loopai.agents.tool import AgentTool
+
+    agent_registry = AgentRegistry()
+    agent_registry.register(disk_analyzer.__agent_meta__)
+    agent_registry.register(disk_cleaner.__agent_meta__)
+
+    # 为每个子 Agent 创建 AgentTool 桥接，注册到主 ToolRegistry
+    for meta in agent_registry.list_all():
+        agent_tool = AgentTool(agent_meta=meta, config=config, bus=bus)
+        registry.register_meta(agent_tool.__tool_meta__)
+
+    # 在系统提示中追加子 Agent 说明
+    sub_agent_lines = [
+        "",
+        "## 可用子 Agent",
+        "你可以将子任务委托给以下子 Agent 执行，等待它们完成后继续：",
+    ]
+    for meta in agent_registry.list_all():
+        sub_agent_lines.append(f"- **{meta.name}** — {meta.description}")
+    system_prompt += "\n".join(sub_agent_lines)
+
     # ── 创建带有初始消息的会话 ────────────────────────────────────
     session = Session(config=config)
     session.add_message("system", content=system_prompt)
