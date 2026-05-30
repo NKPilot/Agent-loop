@@ -27,6 +27,8 @@ class AgentMetadata(BaseModel):
         tool_registry: 子 Agent 可用的工具注册表。
         max_steps: 子 Agent 的最大步骤预算。
         timeout: 子 Agent 整体执行超时时间（秒）。
+        param_schema: Agent 参数的 JSON Schema（从装饰函数的类型提示生成）。
+        validation_model: 用于运行时参数验证的 Pydantic 模型。
     """
 
     name: str
@@ -35,6 +37,8 @@ class AgentMetadata(BaseModel):
     tool_registry: Any = Field(default=None, exclude=True)
     max_steps: int = 10
     timeout: float = 120.0
+    param_schema: dict = Field(default_factory=dict)
+    validation_model: Any = Field(default=None, exclude=True)
 
     model_config = {"arbitrary_types_allowed": True}
 
