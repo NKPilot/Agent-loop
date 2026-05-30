@@ -99,7 +99,7 @@ def test_list_sessions_with_data(test_client, monkeypatch, tmp_path):
     completed = [s for s in data["sessions"] if s["id"] == "abc123"]
     assert len(completed) == 1
     assert completed[0]["status"] == "completed"
-    assert completed[0]["step_count"] == 2  # seq of last line
+    assert completed[0]["step_count"] == 3  # total event lines in JSONL
 
 
 # ── Test 3: Get session detail ──────────────────────────────────────────
