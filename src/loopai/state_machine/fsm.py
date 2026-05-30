@@ -417,7 +417,7 @@ class ReActFSM:
 
             if not should_proceed:
                 if loop_action == "force_exit":
-                    session.state = AgentState.FINISH
+                    session.state = AgentState.FINISH_WAIT
                     self._exit_reason = "loop_detected"
                     return
 
@@ -610,7 +610,7 @@ class ReActFSM:
         self._last_act_failed = False  # 为下一个循环重置
 
         if unreachable == "unreachable":
-            session.state = AgentState.FINISH
+            session.state = AgentState.FINISH_WAIT
             self._exit_reason = "unreachable"
         else:
             session.state = AgentState.REASON

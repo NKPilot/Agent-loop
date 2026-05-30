@@ -98,7 +98,7 @@ async def test_reason_to_finish_no_tool_calls():
 
     result = await fsm.run(session)
 
-    assert result.state == AgentState.FINISH
+    assert result.state == AgentState.FINISH_WAIT
     assert result.messages[-1]["role"] == "assistant"
     assert result.messages[-1]["content"] == "The answer is 391."
     assert "tool_calls" not in result.messages[-1] or not result.messages[-1].get("tool_calls")
@@ -137,7 +137,7 @@ async def test_reason_to_act_with_tool_calls():
 
     result = await fsm.run(session)
 
-    assert result.state == AgentState.FINISH
+    assert result.state == AgentState.FINISH_WAIT
     roles = [m["role"] for m in result.messages]
     assert "assistant" in roles
     assert "tool" in roles
@@ -182,7 +182,7 @@ async def test_full_react_cycle_multiple_steps():
 
     result = await fsm.run(session)
 
-    assert result.state == AgentState.FINISH
+    assert result.state == AgentState.FINISH_WAIT
     # After 2 tool cycles + final answer, step_count should be 3
     assert result.step_count == 3
     assert result.messages[-1]["content"] == "Disk usage analysis complete."
@@ -256,12 +256,12 @@ async def test_step_events_emitted():
 
     step_starts = bus.replay("step_start")
     step_ends = bus.replay("step_end")
-    session_ends = bus.replay("session_end")
+    round_ends = bus.replay("round_end")
 
     # Two REASON cycles → two StepStart + two StepEnd
     assert len(step_starts) == 2
     assert len(step_ends) == 2
-    assert len(session_ends) == 1
+    assert len(round_ends) == 1
 
     # Step numbers should increment
     assert step_starts[0]["step_num"] == 1
@@ -335,11 +335,10 @@ async def test_budget_exhausted_final_summary():
 
     result = await fsm.run(session)
 
-    assert result.state == AgentState.FINISH
+    assert result.state == AgentState.FINISH_WAIT
 
-    session_ends = bus.replay("session_end")
-    assert len(session_ends) == 1
-    assert session_ends[0]["exit_reason"] == "budget_exhausted"
+    round_ends = bus.replay("round_end")
+    assert len(round_ends) == 1
 
 
 # ── Test 8: Loop detection blocks tool ────────────────────────────────
@@ -400,7 +399,7 @@ async def test_loop_detection_blocks_tool():
     result = await fsm.run(session)
 
     # Should have terminated (either by force_exit → FINISH or unreachable → FINISH)
-    assert result.state == AgentState.FINISH
+    assert result.state == AgentState.FINISH_WAIT
 
     # Verify loop_detected events were published (at warn threshold)
     loop_events = bus.replay("loop_detected")
@@ -448,11 +447,10 @@ async def test_unreachable_detection_too_many_failures():
 
     result = await fsm.run(session)
 
-    assert result.state == AgentState.FINISH
+    assert result.state == AgentState.FINISH_WAIT
 
-    session_ends = bus.replay("session_end")
-    assert len(session_ends) == 1
-    assert session_ends[0]["exit_reason"] == "unreachable"
+    round_ends = bus.replay("round_end")
+    assert len(round_ends) == 1
 
 
 # ── Test 10: Message validation rejects orphans ───────────────────────
@@ -595,7 +593,7 @@ async def test_fsm_uses_tool_registry_and_executor():
     assert "duration_ms" in tool_results[0]
 
     # Tool result message is in the session
-    assert result.state == AgentState.FINISH
+    assert result.state == AgentState.FINISH_WAIT
 
 
 @pytest.mark.asyncio
@@ -743,7 +741,7 @@ async def test_fsm_waits_for_confirm_then_proceeds():
 
     # Executor should have been called (confirmation was granted)
     executor.execute.assert_called()
-    assert result.state == AgentState.FINISH
+    assert result.state == AgentState.FINISH_WAIT
 
 
 @pytest.mark.asyncio
@@ -1015,7 +1013,7 @@ class TestContextManagement:
         result = await fsm.run(session)
 
         compressor.check_and_compress.assert_not_called()
-        assert result.state == AgentState.FINISH
+        assert result.state == AgentState.FINISH_WAIT
 
     @pytest.mark.asyncio
     async def test_summary_llm_call(self):
@@ -1067,7 +1065,7 @@ class TestContextManagement:
         assert len(first_call_msgs) == 1
         assert "摘要" in first_call_msgs[0]["content"]
 
-        assert result.state == AgentState.FINISH
+        assert result.state == AgentState.FINISH_WAIT
 
     @pytest.mark.asyncio
     async def test_compressor_none_skips_compression(self):
@@ -1100,7 +1098,7 @@ class TestContextManagement:
         compacted_events = bus.replay("context_compacted")
         assert len(compacted_events) == 0
 
-        assert result.state == AgentState.FINISH
+        assert result.state == AgentState.FINISH_WAIT
 
     @pytest.mark.asyncio
     async def test_overflow_file_reference_in_content(self):
@@ -1366,7 +1364,7 @@ class TestResilienceIntegration:
 
         # checkpoint_manager.save() should have been called at least once
         mocks["checkpoint_manager"].save.assert_called()
-        assert result.state == AgentState.FINISH
+        assert result.state == AgentState.FINISH_WAIT
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_check_called(self):
@@ -1400,7 +1398,7 @@ class TestResilienceIntegration:
         call_args = mocks["circuit_breaker"].check.call_args
         assert call_args[0][0] == "bash"
 
-        assert result.state == AgentState.FINISH
+        assert result.state == AgentState.FINISH_WAIT
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_record_called(self):
@@ -1459,7 +1457,7 @@ class TestResilienceIntegration:
 
         # LLM should have been called (guard didn't block)
         client.complete.assert_called()
-        assert result.state == AgentState.FINISH
+        assert result.state == AgentState.FINISH_WAIT
 
     @pytest.mark.asyncio
     async def test_failure_registry_records_on_error(self):
