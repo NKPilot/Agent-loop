@@ -1065,7 +1065,7 @@ class TestContextManagement:
         assert first_call.kwargs.get("tools") is None
         first_call_msgs = first_call.args[0]
         assert len(first_call_msgs) == 1
-        assert "summar" in first_call_msgs[0]["content"].lower()
+        assert "摘要" in first_call_msgs[0]["content"]
 
         assert result.state == AgentState.FINISH
 
