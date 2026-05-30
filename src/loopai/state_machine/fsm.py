@@ -65,7 +65,7 @@ class ReActFSM:
         message_validator: MessageValidator,
         registry: ToolRegistry,
         executor: ToolExecutor,
-        permission_guard: PermissionGuard,
+        permission_guard: PermissionGuard | None = None,
         *,
         # 第 3 阶段
         token_guard: TokenGuard | None = None,
@@ -441,38 +441,39 @@ class ReActFSM:
                 any_blocked = True
                 continue
 
-            # 第 2 步：权限检查（D-09）
-            perm_result, perm_action = await self.permission_guard.check(
-                tool_name,
-                raw_args,
-                metadata.permission_level,
-                session.session_id,
-                step_num,
-                tool_call_id=tool_call_id,
-            )
+            # 第 2 步：权限检查（D-09）——仅当 PermissionGuard 存在时
+            if self.permission_guard is not None:
+                perm_result, perm_action = await self.permission_guard.check(
+                    tool_name,
+                    raw_args,
+                    metadata.permission_level,
+                    session.session_id,
+                    step_num,
+                    tool_call_id=tool_call_id,
+                )
 
-            if not perm_result:
-                # 用户拒绝或确认超时
-                if perm_action == "user_denied":
-                    session.add_message(
-                        "tool",
-                        content=f"[SYSTEM] 操作被用户拒绝：{tool_name}",
-                        tool_call_id=tool_call_id,
-                    )
-                elif perm_action == "timeout":
-                    session.add_message(
-                        "tool",
-                        content=f"[SYSTEM] 操作确认超时：{tool_name}",
-                        tool_call_id=tool_call_id,
-                    )
-                else:
-                    session.add_message(
-                        "tool",
-                        content=f"[SYSTEM] 操作被阻止：{tool_name}",
-                        tool_call_id=tool_call_id,
-                    )
-                any_blocked = True
-                continue
+                if not perm_result:
+                    # 用户拒绝或确认超时
+                    if perm_action == "user_denied":
+                        session.add_message(
+                            "tool",
+                            content=f"[SYSTEM] 操作被用户拒绝：{tool_name}",
+                            tool_call_id=tool_call_id,
+                        )
+                    elif perm_action == "timeout":
+                        session.add_message(
+                            "tool",
+                            content=f"[SYSTEM] 操作确认超时：{tool_name}",
+                            tool_call_id=tool_call_id,
+                        )
+                    else:
+                        session.add_message(
+                            "tool",
+                            content=f"[SYSTEM] 操作被阻止：{tool_name}",
+                            tool_call_id=tool_call_id,
+                        )
+                    any_blocked = True
+                    continue
 
             # 第 3 步：通过 ToolExecutor 执行工具
             result = await self.executor.execute(tool_name, raw_args)

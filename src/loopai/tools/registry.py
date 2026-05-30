@@ -51,8 +51,11 @@ class ToolRegistry:
 
         Raises:
             AttributeError: 如果 *tool_fn* 未用 ``@tool`` 装饰。
+            ValueError: 如果名称已存在。
         """
         meta: ToolMetadata = tool_fn.__tool_meta__
+        if meta.name in self._tools:
+            raise ValueError(f"Tool '{meta.name}' is already registered")
         self._tools[meta.name] = meta
 
     def register_meta(self, meta: ToolMetadata) -> None:
