@@ -58,30 +58,84 @@
 
 ## v2 需求
 
-Agent-as-Tool——多 Agent 协作。
+Agent-as-Tool——多 Agent 协作。v1.0 阶段 6 全部完成，移至已验证。
 
 ### Agent-as-Tool 框架
 
-- [ ] **AGT-01**: AgentTool——将任意 Agent 封装为 `@tool`，主 Agent 可通过工具调用委托子 Agent
-- [ ] **AGT-02**: 子 Agent Session 隔离——每次子 Agent 调用创建独立 Session，上下文不污染主 Agent
-- [ ] **AGT-03**: 结果回传——子 Agent 完成后结构化返回结果（含摘要、工具调用记录、token 消耗）
-- [ ] **AGT-04**: 超时和预算控制——子 Agent 有独立的 step budget 和超时限制
-- [ ] **AGT-05**: 子 Agent 工具集——可配置每个子 Agent 的工具范围（不同于主 Agent）
+- [x] **AGT-01**: AgentTool——将任意 Agent 封装为 `@tool`，主 Agent 可通过工具调用委托子 Agent
+- [x] **AGT-02**: 子 Agent Session 隔离——每次子 Agent 调用创建独立 Session，上下文不污染主 Agent
+- [x] **AGT-03**: 结果回传——子 Agent 完成后结构化返回结果（含摘要、工具调用记录、token 消耗）
+- [x] **AGT-04**: 超时和预算控制——子 Agent 有独立的 step budget 和超时限制
+- [x] **AGT-05**: 子 Agent 工具集——可配置每个子 Agent 的工具范围（不同于主 Agent）
 
 ### 业务验证
 
-- [ ] **BIZ-03**: 磁盘诊断多 Agent 演示——主 Agent 委托"磁盘分析 Agent"诊断 + 委托"清理 Agent"执行清理
+- [x] **BIZ-03**: 磁盘诊断多 Agent 演示——主 Agent 委托"磁盘分析 Agent"诊断 + 委托"清理 Agent"执行清理
 
 ### Web 前端
 
-- [ ] **WEB-01**: 多 Agent 调用链可视化——Dashboard 展示主 Agent 和子 Agent 的嵌套调用关系
-- [ ] **WEB-02**: 子 Agent 会话可展开——点击子 Agent 调用可展开查看其完整时间线
+- [x] **WEB-01**: 多 Agent 调用链可视化——Dashboard 展示主 Agent 和子 Agent 的嵌套调用关系
+- [x] **WEB-02**: 子 Agent 会话可展开——点击子 Agent 调用可展开查看其完整时间线
 
 ### 延期（v3+）
 
 - 会话回放、通用人在回路、类型化状态
 - 工具推测执行、Ablation 分析、Fuzz 测试
 - 多 LLM 提供商适配、长期记忆
+
+## v1.1 需求 — 动态工具系统
+
+Agent 能在沙箱内自主编写 Python/Bash 代码，经用户确认后动态注册为新工具。
+
+### DYN-CREATE — 动态工具创建核心
+
+- [ ] **DYN-01**: Agent 通过 `generate_tool` 内置工具提交 Python 或 Bash 代码
+- [ ] **DYN-02**: 系统自动执行语法检查（`ast.parse()` / `bash -n`），失败时返回结构化错误给 Agent，Agent 可修改代码重试
+- [ ] **DYN-03**: 危险模块/命令扫描（覆盖 30+ 入口如 `os`、`subprocess`、`ctypes`、`socket`、`eval`、`exec` 等），扫描结果标记在确认弹窗中
+- [ ] **DYN-04**: 自动从代码中提取工具元数据（名称、描述、参数 schema），以 `dynamic.{hash[:8]}_{name}` 命名空间注册
+
+### DYN-CONFIRM — 前端确认弹窗
+
+- [ ] **DYN-05**: ToolCreationDialog 展示代码（Monaco Editor 语法高亮，只读模式）
+- [ ] **DYN-06**: 用户选择持久化级别：会话级 / 沙箱级 / 项目级
+- [ ] **DYN-07**: 用户可指定额外目录权限（默认仅访问工具专用沙箱子目录）
+- [ ] **DYN-08**: 用户确认或拒绝后，结果通过 EventBus 事件回传给 Agent
+
+### DYN-TEST — 工具自测验证
+
+- [ ] **DYN-09**: 语法检查通过后，Agent 在隔离沙箱中执行自测用例，验证工具能正常调用并返回预期结果
+- [ ] **DYN-10**: 自测结果（通过/失败/输出日志）展示在确认弹窗中供用户审查
+
+### DYN-RUNTIME — 运行时沙箱
+
+- [ ] **DYN-11**: 动态工具在独立子进程中执行（`subprocess`），与主进程隔离
+- [ ] **DYN-12**: `resource.setrlimit` 硬限制：CPU 时间、内存 512MB、超时 30s（可调至 120s）
+- [ ] **DYN-13**: 子进程禁止网络访问
+- [ ] **DYN-14**: 文件系统访问默认限于 `.sandbox/tools_runtime/{tool_name}/`，用户可在确认时授予额外目录
+
+### DYN-MANAGE — 工具管理面板
+
+- [ ] **DYN-15**: 前端侧边栏新增"动态工具"tab，列出所有动态工具（名称、描述、持久化级别、状态）
+- [ ] **DYN-16**: 点击工具项查看完整代码（Monaco Editor 只读）
+- [ ] **DYN-17**: 禁用/启用动态工具——禁用的工具不出现在 system prompt 且不可调用
+- [ ] **DYN-18**: 删除动态工具（含确认弹窗），根据持久化级别清理对应存储
+
+### DYN-UPDATE — 工具更新与冲突
+
+- [ ] **DYN-19**: Agent 可通过 `generate_tool` 提交已有工具的更新版本
+- [ ] **DYN-20**: 更新时前端 Monaco DiffEditor（新旧代码 side-by-side），用户选择覆盖或拒绝
+- [ ] **DYN-21**: 命名冲突时展示新旧代码对比，用户选择覆盖（更新）或拒绝（需改名）
+
+### DYN-DISCOVER — 工具发现
+
+- [ ] **DYN-22**: 启动时扫描所有持久化动态工具，将工具名和描述注入 system prompt
+- [ ] **DYN-23**: `list_tools` 内置工具，Agent 可查询所有动态工具的详细信息
+
+### DYN-PERSIST — 持久化
+
+- [ ] **DYN-24**: 会话级——工具仅在内存中注册，会话结束自动清理
+- [ ] **DYN-25**: 沙箱级——工具保存到 `.sandbox/tools/{tool_name}/`，后续会话启动时自动加载
+- [ ] **DYN-26**: 项目级——工具保存为 `src/loopai/tools/dynamic/{tool_name}.py`，可 git 提交
 
 ## 不在范围内
 
@@ -139,4 +193,4 @@ Agent-as-Tool——多 Agent 协作。
 
 ---
 *需求定义: 2026-05-27*
-*最后更新: 2026-05-27 映射到阶段*
+*最后更新: 2026-05-31 v1.1 需求定义*
