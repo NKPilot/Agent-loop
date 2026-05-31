@@ -156,11 +156,11 @@
   5. 确认通过的工具按用户选择的持久化级别存储（会话级内存、沙箱级 `.sandbox/tools/`、项目级 `src/loopai/tools/dynamic/`），以 `dynamic.{hash[:8]}_{name}` 命名空间注册到 ToolRegistry，Agent 后续可调用
 **计划**: 5 plans
 **Plans**:
-- [ ] 08-01-PLAN.md — 类型契约与事件 Schema（ToolMetadata 扩展 + 6 个事件类型 + API Schema + 前端 TypeScript 类型）
-- [ ] 08-02-PLAN.md — 沙箱扫描器 + 注册表分区 + 持久化管理器
-- [ ] 08-03-PLAN.md — DynamicToolCreator 6 阶段管道 + generate_tool 内置工具
-- [ ] 08-04-PLAN.md — 后端集成（create_agent_components 注册 + REST 端点 + system prompt 动态工具列表）
-- [ ] 08-05-PLAN.md — 前端 ToolCreationDialog（Monaco Editor + 风险评估 + 持久化选择 + 自测结果）
+- [x] 08-01-PLAN.md — 类型契约与事件 Schema（ToolMetadata 扩展 + 6 个事件类型 + API Schema + 前端 TypeScript 类型）
+- [x] 08-02-PLAN.md — 沙箱扫描器 + 注册表分区 + 持久化管理器
+- [x] 08-03-PLAN.md — DynamicToolCreator 6 阶段管道 + generate_tool 内置工具
+- [x] 08-04-PLAN.md — 后端集成（create_agent_components 注册 + REST 端点 + system prompt 动态工具列表）
+- [x] 08-05-PLAN.md — 前端 ToolCreationDialog（Monaco Editor + 风险评估 + 持久化选择 + 自测结果）
 **UI hint**: yes
 
 ### 阶段 9: 安全加固与沙箱隔离

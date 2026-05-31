@@ -2,13 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 动态工具系统
-status: planning
-last_updated: "2026-05-31T03:51:31.419Z"
+status: milestone_complete
+last_updated: "2026-05-31T04:35:06.316Z"
 progress:
   total_phases: 1
-  completed_phases: 0
-  total_plans: 0
+  completed_phases: 1
+  total_plans: 5
   completed_plans: 0
+  percent: 100
 ---
 
 # 项目状态
