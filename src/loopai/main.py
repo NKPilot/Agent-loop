@@ -35,8 +35,11 @@ from loopai.state_machine.guards import (
     TokenGuard,
 )
 from loopai.tools.bash import create_bash_tool
+from loopai.tools.dynamic_creator import DynamicToolCreator, create_generate_tool_fn
 from loopai.tools.executor import ToolExecutor
 from loopai.tools.registry import ToolRegistry
+from loopai.tools.sandbox import SandboxExecutor
+from loopai.tools.tool_persistence import ToolPersistenceManager
 
 if TYPE_CHECKING:
     from loopai.config import AgentConfig
@@ -70,6 +73,7 @@ def create_agent_components(
         - permission_guard: 用于确认流程的 PermissionGuard
         - registry: 已注册 bash 工具的 ToolRegistry
         - executor: 连接到 registry 的 ToolExecutor
+        - dynamic_creator: 动态工具创建器（v1.1 Phase 8）
         - checkpoint_manager: 用于恢复的 CheckpointManager
         - failure_registry: 用于错误追踪的 FailureRegistry
         - bus: 传入的 EventBus 实例
@@ -86,8 +90,37 @@ def create_agent_components(
     registry.register(bash_fn)
     from loopai.tools.disk_tools import register_disk_tools
     register_disk_tools(registry, working_dir=config.tool_working_dir)
+
+    # ── 创建会话（先生成 session_id，供动态工具基础设施使用）──────
+    session = Session(config=config)
+
+    # ── 动态工具创建基础设施（v1.1 Phase 8）─────────────────────────
+    sandbox = SandboxExecutor()
+    tool_persistence = ToolPersistenceManager()
+    dynamic_creator = DynamicToolCreator(
+        registry=registry,
+        bus=bus,
+        session_id=session.session_id,
+        sandbox=sandbox,
+        persistence=tool_persistence,
+    )
+    generate_tool_fn = create_generate_tool_fn(dynamic_creator)
+    registry.register(generate_tool_fn)
+
+    # ── 构建系统提示（现在包含 generate_tool）──────────────────────
     from loopai.tools.prompt_builder import build_system_prompt
     system_prompt = build_system_prompt(registry, working_dir=config.tool_working_dir)
+
+    # 追加动态工具创建指引
+    system_prompt += (
+        "\n\n## 动态工具创建\n"
+        "你可以通过调用 `generate_tool` 工具来创建新的动态工具。提供工具名称、描述、"
+        "Python/Bash 代码、测试用例代码、编程语言（python/bash）和参数 JSON Schema。"
+        "系统会自动进行语法检查和安全扫描，然后弹出确认窗口供用户审批。"
+        "审批通过并自测成功后，新工具将以 `dynamic.{hash}_{name}` 格式注册到系统中，"
+        "你可以像其他工具一样调用它。\n"
+        "使用建议：当现有的静态工具无法满足需求时，考虑创建动态工具来扩展能力。"
+    )
 
     # ── 注册子 Agent（Agent-as-Tool, Phase 6）─────────────────────
     from loopai.agents.disk_agents import disk_analyzer, disk_cleaner
@@ -113,8 +146,7 @@ def create_agent_components(
         sub_agent_lines.append(f"- **{meta.name}** — {meta.description}")
     system_prompt += "\n".join(sub_agent_lines)
 
-    # ── 创建带有初始消息的会话 ────────────────────────────────────
-    session = Session(config=config)
+    # ── 填充初始消息 ────────────────────────────────────────────────
     session.add_message("system", content=system_prompt)
     session.add_message("user", content=prompt)
 
@@ -159,6 +191,7 @@ def create_agent_components(
         "permission_guard": permission_guard,
         "registry": registry,
         "executor": executor,
+        "dynamic_creator": dynamic_creator,
         "checkpoint_manager": checkpoint_manager,
         "failure_registry": failure_registry,
         "bus": bus,
