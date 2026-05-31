@@ -309,6 +309,89 @@ class AgentCallEnd(EventBase):
     success: bool
 
 
+# ── 动态工具创建事件（Phase 8）──────────────────────────────────────────
+
+
+class ToolCreationRequested(EventBase):
+    """Agent 请求创建新的动态工具时发布。
+
+    携带完整源代码供用户审查。此事件通过 SSE 流式传输到
+    前端，触发 ToolCreationDialog 弹窗。
+    """
+
+    event_type: Literal["tool_creation_requested"] = "tool_creation_requested"
+    step_num: int
+    confirmation_id: str
+    tool_name: str
+    tool_id: str
+    description: str
+    code: str
+    language: Literal["python", "bash"]
+    risk_flags: list[dict]
+    test_code: str
+    param_schema: dict
+
+
+class ToolCreationConfirmed(EventBase):
+    """用户确认工具创建后发布。
+
+    携带用户选择的持久化级别和额外目录权限。
+    """
+
+    event_type: Literal["tool_creation_confirmed"] = "tool_creation_confirmed"
+    step_num: int
+    confirmation_id: str
+    tool_name: str
+    persistence: Literal["session", "sandbox", "project"]
+    extra_dirs: list[str] = []
+
+
+class ToolCreationRejected(EventBase):
+    """用户拒绝工具创建时发布。"""
+
+    event_type: Literal["tool_creation_rejected"] = "tool_creation_rejected"
+    step_num: int
+    confirmation_id: str
+    tool_name: str
+
+
+class ToolCreationTestResult(EventBase):
+    """Agent 自测执行完成后发布。
+
+    携带测试状态（通过/失败/超时）和输出信息。
+    """
+
+    event_type: Literal["tool_creation_test_result"] = "tool_creation_test_result"
+    tool_name: str
+    status: Literal["passed", "failed", "timeout"]
+    output: str
+    error: str | None = None
+    duration_ms: float
+
+
+class ToolCreated(EventBase):
+    """动态工具成功注册到 ToolRegistry 后发布。"""
+
+    event_type: Literal["tool_created"] = "tool_created"
+    step_num: int
+    tool_name: str
+    tool_id: str
+    persistence: Literal["session", "sandbox", "project"]
+
+
+class ToolCreationFailed(EventBase):
+    """动态工具创建流程中某阶段失败时发布。
+
+    携带失败阶段标识和错误消息，供前端展示失败原因。
+    """
+
+    event_type: Literal["tool_creation_failed"] = "tool_creation_failed"
+    step_num: int
+    tool_name: str
+    stage: str
+    error_message: str
+
+
 # ── 区分联合类型 ──────────────────────────────────────────────────────
 
 Event = Annotated[
@@ -337,6 +420,12 @@ Event = Annotated[
     | FailureRegistered
     | EscalationRequired
     | AgentCallStart
-    | AgentCallEnd,
+    | AgentCallEnd
+    | ToolCreationRequested
+    | ToolCreationConfirmed
+    | ToolCreationRejected
+    | ToolCreationTestResult
+    | ToolCreated
+    | ToolCreationFailed,
     Field(discriminator="event_type"),
 ]

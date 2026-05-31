@@ -4,6 +4,8 @@
 请求和响应模式。
 """
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -79,6 +81,30 @@ class SendMessageResponse(BaseModel):
     round_num: int
 
 
+# ── 动态工具创建 API Schema（Phase 8）───────────────────────────────────
+
+
+PersistenceLevel = Literal["session", "sandbox", "project"]
+"""动态工具的持久化级别。
+
+- ``session``: 仅当前会话有效，会话结束后释放
+- ``sandbox``: 写入沙箱工作目录，同会话复用
+- ``project``: 写入项目 tools/ 目录，跨会话持久化
+"""
+
+
+class ConfirmToolCreationRequest(BaseModel):
+    """POST /api/sessions/{id}/confirm-tool-creation 的请求体。
+
+    携带用户对动态工具创建的确认决策、持久化级别和额外目录权限。
+    """
+
+    confirmation_id: str
+    approved: bool
+    persistence: PersistenceLevel = "session"
+    extra_dirs: list[str] = []
+
+
 __all__ = [
     "SessionSummary",
     "SessionListResponse",
@@ -89,4 +115,5 @@ __all__ = [
     "DeleteResponse",
     "SendMessageRequest",
     "SendMessageResponse",
+    "ConfirmToolCreationRequest",
 ]
