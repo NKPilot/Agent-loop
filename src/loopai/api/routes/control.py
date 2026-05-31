@@ -5,8 +5,9 @@
 工厂函数与 CLI 路径共享组件。
 
 端点：
-    POST /api/sessions/start               — 启动新的 Agent 会话
-    POST /api/sessions/{session_id}/confirm — 响应确认请求
+    POST /api/sessions/start                            — 启动新的 Agent 会话
+    POST /api/sessions/{session_id}/confirm             — 响应确认请求
+    POST /api/sessions/{session_id}/confirm-tool-creation — 响应动态工具创建确认
 
 决策引用：
     D-06: Web 前端的危险确认对话框
@@ -26,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from loopai.api.schemas import (
     ConfirmRequest,
+    ConfirmToolCreationRequest,
     SendMessageRequest,
     SendMessageResponse,
     StartSessionRequest,
@@ -129,6 +131,17 @@ async def _run_and_cleanup(session, fsm, bus, app):
         # 清理
         if session_id in app.state.active_sessions:
             entry = app.state.active_sessions[session_id]
+            # 清理会话级动态工具（DYN-24）
+            dynamic_creator = entry.get("dynamic_creator")
+            if dynamic_creator is not None:
+                registry = dynamic_creator._registry
+                for meta in registry.list_dynamic():
+                    # 会话级工具：persistence tag 不含 "persist:"
+                    if not any(tag.startswith("persist:") for tag in meta.tags):
+                        try:
+                            registry.remove(meta.name)
+                        except ValueError:
+                            pass  # 跳过静态工具删除保护
             entry["status"] = "completed"
         app.state.session_queues.pop(session_id, None)
 
@@ -168,6 +181,7 @@ async def start_session(body: StartSessionRequest, request: Request):
     fsm = components["fsm"]
     logger_obj = components["logger"]
     permission_guard = components["permission_guard"]
+    dynamic_creator = components.get("dynamic_creator")
 
     # 注册会话消息队列（多轮对话用）
     app_state = request.app.state
@@ -188,6 +202,7 @@ async def start_session(body: StartSessionRequest, request: Request):
         "task": agent_task,
         "logger_task": logger_task,
         "permission_guard": permission_guard,
+        "dynamic_creator": dynamic_creator,
         "status": "running",
     }
 
@@ -250,6 +265,67 @@ async def confirm_session(
 
     # respond() 是同步方法——存储结果并设置 Event
     permission_guard.respond(body.confirmation_id, body.approved)
+
+    return {
+        "confirmation_id": body.confirmation_id,
+        "approved": body.approved,
+        "responded": True,
+    }
+
+
+@router.post("/sessions/{session_id}/confirm-tool-creation")
+async def confirm_tool_creation(
+    session_id: str,
+    body: ConfirmToolCreationRequest,
+    request: Request,
+) -> dict:
+    """响应待处理的工具创建确认请求。
+
+    在 app.state.active_sessions 中查找会话，获取 DynamicToolCreator，
+    并调用 respond() 传入用户的确认/拒绝决定和配置。
+    DynamicToolCreator.respond() 设置 asyncio.Event 解除 generate_tool 管道的阻塞。
+
+    Args:
+        session_id: 目标会话 ID。
+        body: 包含 confirmation_id、approved、persistence、extra_dirs 的请求体。
+        request: FastAPI 请求对象。
+
+    Returns:
+        包含 confirmation_id、approved、responded 键的字典。
+
+    Raises:
+        HTTPException 404: 会话未找到、dynamic_creator 不存在或 confirmation_id 无效。
+    """
+    active_sessions = request.app.state.active_sessions
+
+    if session_id not in active_sessions:
+        raise HTTPException(
+            status_code=404, detail=f"Session '{session_id}' not found"
+        )
+
+    entry = active_sessions[session_id]
+    dynamic_creator = entry.get("dynamic_creator")
+
+    if dynamic_creator is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No dynamic tool creator for session '{session_id}'",
+        )
+
+    # 验证 confirmation_id 是否为待处理状态
+    if body.confirmation_id not in dynamic_creator._pending_confirmations:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Confirmation '{body.confirmation_id}' not found or already responded",
+        )
+
+    # 构造配置 dict 传给 DynamicToolCreator
+    config = {
+        "approved": body.approved,
+        "persistence_level": body.persistence,
+        "extra_dirs": body.extra_dirs,
+    }
+    dynamic_creator.respond(body.confirmation_id, body.approved, config)
 
     return {
         "confirmation_id": body.confirmation_id,
