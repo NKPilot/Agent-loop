@@ -639,7 +639,7 @@ interface UIState {
 | A3 | 用户确认后 `activate_sessions[session_id]["dynamic_creator"]` 可正常访问 | Code Examples | 如果 create_agent_components 未正确传递 dynamic_creator 到 active_sessions，API 端点将 404 |
 | A4 | ToolMetadata 的 `is_dynamic` / `tool_type` 字段不会破坏现有序列化逻辑 | Architecture Patterns | JSONL 日志和 OpenAI schema 序列化使用 `model_dump()` + `exclude`，新字段默认值向后兼容 |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **generate_tool 的 ToolMetadata 如何构建 `func_ref`（动态工具的实际可调用对象）?**
    - What we know: `func_ref` 需要是一个接受参数并返回结果的 async callable。动态工具的 func_ref 内部调用 SandboxExecutor.execute() 而非直接执行代码
