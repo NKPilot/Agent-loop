@@ -1,15 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: milestone_complete
-last_updated: "2026-05-30T01:10:23.001Z"
+milestone: v1.1
+milestone_name: 动态工具系统
+status: planning
+last_updated: "2026-05-31T02:04:52.975Z"
+last_activity: 2026-05-31
 progress:
-  total_phases: 5
-  completed_phases: 6
-  total_plans: 22
-  completed_plans: 21
-  percent: 120
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # 项目状态
@@ -97,3 +98,10 @@ progress:
 上次会话: 2026-05-30
 停止于: 05-06 ToolDetail + TokenUsageCard + ConfirmationDialog 完成
 恢复文件: .planning/phases/05-observability/05-06-SUMMARY.md
+
+## Current Position
+
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-31 — Milestone v1.1 started
