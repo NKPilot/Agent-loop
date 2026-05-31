@@ -54,6 +54,22 @@ def build_system_prompt(registry: ToolRegistry, working_dir: str = ".") -> str:
     for name, desc in dangerous_tools:
         lines.append(f"- **{name}** — {desc}（危险操作，需要用户确认）")
 
+    # 动态工具段落（v1.1 Phase 8）
+    dynamic_tools = [
+        m for m in registry.list_all() if m.is_dynamic
+    ]
+    if dynamic_tools:
+        lines.append("")
+        lines.append("## 动态工具")
+        lines.append("以下是由 Agent 创建并通过用户审批的动态工具：")
+        for meta in dynamic_tools:
+            pers_tag = next((t for t in meta.tags if t.startswith("persist:")), "persist:session")
+            persistence_label = pers_tag.replace("persist:", "")
+            lines.append(
+                f"- **{meta.name}** — {meta.description} "
+                f"（动态工具，{persistence_label}级持久化）"
+            )
+
     lines.extend([
         "",
         "## 规则",
