@@ -31,6 +31,16 @@ export interface CostRates {
 
 export type SSEStatus = "connected" | "connecting" | "reconnecting" | "failed";
 
+// ── Dynamic tool creation types (Phase 8) ───────────────────────────────
+
+export interface RiskFlag {
+  type: string;
+  name: string;
+  message: string;
+  severity: "high" | "medium" | "low";
+  line: number;
+}
+
 // ── Round grouping ─────────────────────────────────────────────────────
 
 export interface RoundInfo {
@@ -217,6 +227,63 @@ export interface AgentCallEndEvent extends EventBase {
   success: boolean;
 }
 
+// ── Dynamic tool creation events (Phase 8) ──────────────────────────────
+
+export interface ToolCreationRequestedEvent extends EventBase {
+  event_type: "tool_creation_requested";
+  step_num: number;
+  confirmation_id: string;
+  tool_name: string;
+  tool_id: string;
+  description: string;
+  code: string;
+  language: "python" | "bash";
+  risk_flags: RiskFlag[];
+  test_code: string;
+  param_schema: Record<string, unknown>;
+}
+
+export interface ToolCreationConfirmedEvent extends EventBase {
+  event_type: "tool_creation_confirmed";
+  step_num: number;
+  confirmation_id: string;
+  tool_name: string;
+  persistence: "session" | "sandbox" | "project";
+  extra_dirs: string[];
+}
+
+export interface ToolCreationRejectedEvent extends EventBase {
+  event_type: "tool_creation_rejected";
+  step_num: number;
+  confirmation_id: string;
+  tool_name: string;
+}
+
+export interface ToolCreationTestResultEvent extends EventBase {
+  event_type: "tool_creation_test_result";
+  tool_name: string;
+  status: "passed" | "failed" | "timeout";
+  output: string;
+  error?: string | null;
+  duration_ms: number;
+}
+
+export interface ToolCreatedEvent extends EventBase {
+  event_type: "tool_created";
+  step_num: number;
+  tool_name: string;
+  tool_id: string;
+  persistence: "session" | "sandbox" | "project";
+}
+
+export interface ToolCreationFailedEvent extends EventBase {
+  event_type: "tool_creation_failed";
+  step_num: number;
+  tool_name: string;
+  stage: string;
+  error_message: string;
+}
+
 // ── Resilience events (Phase 4) ───────────────────────────────────────
 
 export interface CheckpointSavedEvent extends EventBase {
@@ -285,7 +352,13 @@ export type Event =
   | FailureRegisteredEvent
   | EscalationRequiredEvent
   | AgentCallStartEvent
-  | AgentCallEndEvent;
+  | AgentCallEndEvent
+  | ToolCreationRequestedEvent
+  | ToolCreationConfirmedEvent
+  | ToolCreationRejectedEvent
+  | ToolCreationTestResultEvent
+  | ToolCreatedEvent
+  | ToolCreationFailedEvent;
 
 // ── Human-readable label map ──────────────────────────────────────────
 
@@ -316,4 +389,10 @@ export const EVENT_TYPE_MAP: Record<string, string> = {
   escalation_required: "Escalation Required",
   agent_call_start: "Agent Call Start",
   agent_call_end: "Agent Call End",
+  tool_creation_requested: "Tool Creation Requested",
+  tool_creation_confirmed: "Tool Creation Confirmed",
+  tool_creation_rejected: "Tool Creation Rejected",
+  tool_creation_test_result: "Self-Test Result",
+  tool_created: "Tool Created",
+  tool_creation_failed: "Tool Creation Failed",
 };
