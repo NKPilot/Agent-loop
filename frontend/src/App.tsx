@@ -9,6 +9,7 @@ import { startSession, sendMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import ConnectionStatus from "@/components/ConnectionStatus";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
+import ToolCreationDialog from "@/components/ToolCreationDialog";
 import SessionList from "@/components/SessionList";
 import StepCard, { type StepGroup, groupEventsByStep } from "@/components/StepCard";
 import type { Event, UserMessageEvent } from "@/lib/eventTypes";
@@ -397,6 +398,9 @@ function App() {
 
         {/* Confirmation dialog (portal -- renders to document.body) */}
         <ConfirmationDialog />
+
+        {/* Tool creation dialog (portal -- renders to document.body) */}
+        <ToolCreationDialog />
       </div>
     </TooltipProvider>
   );
