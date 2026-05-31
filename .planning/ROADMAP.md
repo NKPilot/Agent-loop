@@ -154,8 +154,13 @@
   3. 用户可在确认弹窗中查看代码（Monaco Editor 语法高亮只读）、选择持久化级别（会话级/沙箱级/项目级）、指定额外目录权限，确认或拒绝后结果通过 EventBus 回传给 Agent
   4. 语法检查通过后，Agent 在隔离沙箱中执行自测用例验证工具能正常调用并返回预期结果，自测结果（通过/失败/输出日志）展示在确认弹窗中供用户审查
   5. 确认通过的工具按用户选择的持久化级别存储（会话级内存、沙箱级 `.sandbox/tools/`、项目级 `src/loopai/tools/dynamic/`），以 `dynamic.{hash[:8]}_{name}` 命名空间注册到 ToolRegistry，Agent 后续可调用
-**计划**: TBD
-**Plans**: TBD
+**计划**: 5 plans
+**Plans**:
+- [ ] 08-01-PLAN.md — 类型契约与事件 Schema（ToolMetadata 扩展 + 6 个事件类型 + API Schema + 前端 TypeScript 类型）
+- [ ] 08-02-PLAN.md — 沙箱扫描器 + 注册表分区 + 持久化管理器
+- [ ] 08-03-PLAN.md — DynamicToolCreator 6 阶段管道 + generate_tool 内置工具
+- [ ] 08-04-PLAN.md — 后端集成（create_agent_components 注册 + REST 端点 + system prompt 动态工具列表）
+- [ ] 08-05-PLAN.md — 前端 ToolCreationDialog（Monaco Editor + 风险评估 + 持久化选择 + 自测结果）
 **UI hint**: yes
 
 ### 阶段 9: 安全加固与沙箱隔离
@@ -180,8 +185,13 @@
   3. 用户可删除动态工具（含确认弹窗），系统根据持久化级别自动清理对应存储
   4. Agent 提交已有工具的新版本时，前端展示新旧代码 side-by-side Monaco DiffEditor，用户选择覆盖或拒绝；命名冲突时同样展示对比供用户决策
   5. 系统启动时自动扫描并加载所有持久化动态工具，工具名和描述注入 system prompt；Agent 可通过 `list_tools` 内置工具查询所有动态工具的详细信息（含完整 Schema）
-**计划**: TBD
-**Plans**: TBD
+**计划**: 5 plans
+**Plans**:
+- [ ] 08-01-PLAN.md — 类型契约与事件 Schema（ToolMetadata 扩展 + 6 个事件类型 + API Schema + 前端 TypeScript 类型）
+- [ ] 08-02-PLAN.md — 沙箱扫描器 + 注册表分区 + 持久化管理器
+- [ ] 08-03-PLAN.md — DynamicToolCreator 6 阶段管道 + generate_tool 内置工具
+- [ ] 08-04-PLAN.md — 后端集成（create_agent_components 注册 + REST 端点 + system prompt 动态工具列表）
+- [ ] 08-05-PLAN.md — 前端 ToolCreationDialog（Monaco Editor + 风险评估 + 持久化选择 + 自测结果）
 **UI hint**: yes
 
 ### 阶段 11: 集成验证与优化
