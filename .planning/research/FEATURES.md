@@ -1,253 +1,190 @@
-# Feature Research: ReAct AI Agent with Harness Engineering
+# Feature Research: Agent 动态工具创建系统
 
-**Domain:** ReAct agent framework (developer-oriented, harness-focused)
-**Researched:** 2026-05-27
-**Confidence:** HIGH (primary sources: LangChain docs, OpenAI Agents SDK, SmolAgents, PydanticAI, LangGraph changelog, harness-engineering toolbox)
+**Domain:** AI Agent 动态工具生成与运行时注册
+**Researched:** 2026-05-31
+**Confidence:** HIGH
 
 ## Feature Landscape
 
 ### Table Stakes (Users Expect These)
 
-Features that the ecosystem treats as non-negotiable. A missing table-stakes feature makes a framework feel incomplete or unusable for real agent work.
+缺失这些特性 = 系统不可用。
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| **ReAct Agent Loop** | Core identity -- LLM reasons, acts via tools, observes results, loops until answer. Without this it is not an agent framework. | MEDIUM | Every framework has one (LangChain `AgentExecutor`, SmolAgents `CodeAgent`, OpenAI `Runner.run_sync()`). loopAI must implement a correct ReAct cycle with tool-call parsing and result injection. |
-| **Tool Registration via Decorator/Schema** | Users expect to turn any Python function into an agent tool with minimal boilerplate. | LOW | SmolAgents `@tool`, PydanticAI `@agent.tool`, OpenAI `@function_tool`, LangChain `@tool`. Standard pattern: docstring -> LLM description, type hints -> JSON schema. |
-| **Tool Result Injection Into Context** | After tool call, the LLM must see the result in the conversation. Without this the loop breaks. | LOW | Standard ReAct pattern. The challenge (and differentiator) is how structured the result is and what metadata it carries. |
-| **Multi-turn Conversation Memory** | Agents must work across multiple user turns without forgetting the conversation. | MEDIUM | LangGraph checkpointing, OpenAI Sessions, PydanticAI `result_type` persist. Baseline: accumulate message list with token-budget trimming. |
-| **Configurable System Prompt** | Users need to set agent persona, constraints, rules via system prompt. | LOW | Universal across frameworks. Trivial to implement. |
-| **LLM Temperature/Model/Max Tokens Config** | Users must control generation parameters. | LOW | Pass-through to API call. |
-| **Tool Call Validation (Schema Check Before Execute)** | Prevent runtime errors from malformed tool arguments before they reach the function. | MEDIUM | Pydantic/Python type validation before invocation. LangChain, PydanticAI, OpenAI all do this. Without it, tool execution is unreliable. |
-| **Streaming Agent Output** | Users want to see agent thinking in real-time, not wait for full completion. | MEDIUM | LangGraph `stream_mode`, OpenAI SDK `.stream_events()`, SmolAgents streaming. Non-negotiable for developer productivity. |
-| **Tool Timeout** | Prevent runaway tool execution from blocking the agent. | LOW | LangGraph node `timeout=`/`run_timeout`, harness-engineering `safe_subprocess_run` with timeout. A tool that hangs forever kills the agent. |
+| **代码语法校验** | 语法错误的工具代码注册后无法执行，破坏 agent 循环 | LOW | `ast.parse()` 校验 Python，`bash -n` 校验 Bash。Anvil SDK、Meta-Tools、所有框架均强制执行此步骤 |
+| **沙箱隔离执行** | LLM 生成的代码不可信——从 CVE-2026-47392（AST 黑名单绕过，`print.__self__` 泄露 builtins）到 smolagents 的 `additional_authorized_imports` RCE，进程内执行 AI 生成代码的风险已被反复证实 | HIGH | 子目录隔离（chroot/路径白名单）+ 禁止网络 + 独立超时。最低要求：子进程执行，不 `exec()`/`eval()` |
+| **用户确认弹窗** | 任何动态工具必须在注册前经人类审核。Anthropic 数据显示人对提示的批准率达 93%，但代码创建确认不同于命令执行——代码审查是安全关键路径 | MEDIUM | 复用现有 `ConfirmationDialog` 模式，但改为代码展示（语法高亮 + 持久化级别 + 目录权限选择），而非简单 y/n |
+| **工具持久化** | 会话重启后动态工具必须仍可用。Anvil SDK 存工具到 `tools_dir/`，AutoLearn 用 SQLite。无持久化则动态工具无意义 | MEDIUM | 文件系统存储最简单可靠。JSONL 记录元数据 + `.py` 文件存实际代码。与现有 JSONL 日志范式一致 |
+| **list_tools 工具发现** | Agent 必须知道有哪些动态工具可用。mini_claw 提供 `list_tools()` + `search_tools_registry()`，Koda 用 `DiscoverTools` 按需加载（节省 57% token） | LOW | 两个层面：system prompt 注入轻量概要（名称+一句话描述），+ `list_tools` 内置工具返回完整 Schema |
+| **运行时错误不崩溃** | 动态工具执行失败不应终止 agent 循环。必须返回结构化错误，让 LLM 自我纠正或放弃该工具 | LOW | 完全复用现有 `ToolExecutor` 的 4 层恢复管道（外观修复→上下文重试→退避→人工介入）和 `ErrorCategory` 分类 |
+| **工具可禁用/删除** | 用户需要对已创建的工具进行生命周期管理。错误的工具应可禁用（保留代码但不执行）或删除 | LOW | 前端管理面板 + API 端点。Registry 需增加 `unregister` 和 `enabled/disabled` 状态 |
 
 ### Differentiators (Competitive Advantage)
 
-Features that set a framework apart. loopAI's thesis is that **harness engineering** -- the infrastructure around the agent loop -- is where the real value lives. These features align with the project's core value: making agents reliable, observable, and extensible.
+使系统从"能用"变为"好用"。
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| **Tool Abstraction Layer (Harness Core)** | Not just "call a function" -- each tool passes through a pipeline: discovery -> authorization -> execution -> result handling. Enables policy enforcement, auditing, and error classification per tool. | HIGH | Cited from MiniHarness 4-stage pipeline (discovery -> authorization -> execution -> result handling) and harness-engineering toolbox. This is loopAI's architectural differentiator -- most frameworks skip this and call functions directly. |
-| **Structured Error Taxonomy** | Classify errors by category (TransientError, LLMRecoverableError, ToolExecutionError, GuardViolationError, ContextOverflowError) so the agent can make informed recovery decisions instead of blind retry. | MEDIUM | Cited from pyarnes error taxonomy and geny-executor ErrorCategory. Enables layered recovery strategies. No mainstream framework does this well. |
-| **Layered Self-Healing Recovery** | Multi-level recovery: (1) cosmetic repair -> (2) in-context retry with feedback -> (3) full retry with backoff -> (4) human escalation. | HIGH | Cited from AgentField 4-layer schema recovery and harness engineering "three pillars." AutoGen and LangChain have basic retry, but not layered recovery. |
-| **Execution Boundaries (Scope Sandbox)** | Constrain what tools can do: filesystem path scope (`PathScope`), command allow/deny lists, safe subprocess execution with env scrubbing. Prevent tools from escaping their intended domain. | MEDIUM | Cited from rail-sdk PathPolicy and harness-engineering `PathScope`/`safe_subprocess_run`. Critical for safety in bash/shell tool scenarios. |
-| **Real-Time Observability Web Dashboard** | Live visualization of: agent reasoning chain, tool call timeline, state changes, token usage, latency breakdown. Interactive rewind/step-through of agent decisions. | HIGH | Cited from Honeycomb Agent Timeline, AgentDiagnose t-SNE plots, Hermes Agent dashboard. No open-source agent framework ships this out of the box -- LangSmith is proprietary/SaaS. This is loopAI's flagship differentiator. |
-| **Guard Stage Pipeline** | Pre/post hooks around the agent loop: token budget guard, cost guard, rate limit guard, content moderation guard, permission guard. Fail fast before expensive LLM calls. | MEDIUM | Cited from geny-executor guard stages and OpenAI guardrails. LangChain has middleware hooks but no structured guard pipeline. |
-| **Deterministic Session Replay** | Re-run a past agent session with the exact same tool results to debug, test, or audit the agent's reasoning. | MEDIUM | Cited from harness-engineering `ReplayRunner`. Enables reproduction of agent behavior -- critical for debugging but absent from all mainstream frameworks. |
-| **Human-in-the-Loop Approval Gates** | Pause agent execution before high-risk tool calls (rm, shutdown, delete) and require human confirmation. Resume with state preserved. | MEDIUM | Cited from OpenAI tool approval, LangGraph `interrupt_before`, harness-engineering permission hooks. Essential for the disk cleanup validation scenario. |
-| **Causal Provenance / Ablation** | Measure which tool calls actually influenced the final outcome. "Leave-one-out" analysis to identify unnecessary or misleading tool calls. | HIGH | Cited from harness-engineering `harness.attribute` module with Jaccard/Embedding similarity. Cutting-edge feature for agent debugging. No mainstream framework has this. |
-| **Tool Speculative Execution** | Pre-execute likely next tool calls in async tasks while the LLM generates the next turn. Idempotency-gated to avoid side effects if the prediction is wrong. | VERY HIGH | Cited from harness-engineering `harness.speculate`. Reduces end-to-end latency. Experimental -- appropriate only after core is solid. |
-| **Fuzz Testing for Tools** | Hypothesis-driven fuzzing of tool call arguments to find edge cases and failure modes before runtime. | MEDIUM | Cited from harness-engineering `harness.fuzz`. Developer tooling for tool robustness. |
-| **Structured State Machine State** | Instead of ad-hoc message list, use a typed state graph (StateGraph style) with reducers for each field. Enables clean state transitions and easy checkpointing. | HIGH | LangGraph pioneered this. For a greenfield framework, implementing a simpler version (not full graph but typed state with reducers) gives the same benefits without graph complexity. |
+| **工具自测验证（Agent 写测试并执行）** | 大部分框架只做到语法校验（`ast.parse`）。让 Agent 先生成测试用例、在沙箱中执行、验证结果通过后才呈现给用户确认——这是 Replit Agent 3 的"独立验证 Agent"模式，Spec Guard 的"failure-first test"（Gate 4）模式。显著降低用户审查负担 | HIGH | 分两阶段：(1) 语法检查（ast.parse/bash -n），(2) Agent 编写 pytest 用例→沙箱执行→结果验证。自测失败则 Agent 自行修复后重试，最多 3 轮迭代 |
+| **三级持久化作用域** | 多数框架只有全局持久化。提供会话级（session 内可用，重启丢失）/ 沙箱级（同一项目内所有 session 可用）/ 项目级（跨项目可用）三个粒度，让用户精确控制工具生命周期 | MEDIUM | 会话级：存内存 + 临时文件。沙箱级：存 `.sandbox/tools/`。项目级：存 `.loopai/tools/`。前端弹窗让用户选择 |
+| **diff 更新 + 命名冲突处理** | Agent 想修改已有工具时，展示新旧代码 diff + 功能变更说明，而非简单覆盖或拒绝。工具重名时合并为同一流程：比对代码→展示差异→用户选择覆盖/重命名/拒绝 | MEDIUM | 依赖 Python `difflib` 生成 unified diff。前端需 `react-diff-viewer` 或自行渲染。冲突处理同时展示两个版本 |
+| **复用现有 @tool 基础设施** | 动态工具创建后直接使用相同的 `ToolMetadata` + `ToolRegistry` + `ToolExecutor` + `EventBus` 管道，自动获得 Pydantic 参数校验、超时控制、重试策略、熔断器、JSONL 日志。动态工具是一等公民，非二等公民 | LOW（架构收益） | `DynamicToolCreator` 生成的工具使用 `ToolRegistry.register_meta()` 注册，与 `@tool` 装饰器无区别。这在生态系统中极少见——多数框架区分静态/动态工具 |
+| **危险模块扫描** | 代码注册前自动扫描 `import os` / `subprocess` / `socket` / `shutil.rmtree` 等危险调用，标记为 `PermissionLevel.DANGEROUS`，运行前强制用户确认。Anvil SDK 无此功能，smolagents 因缺少此扫描导致文件泄露 | MEDIUM | AST 遍历检测 import 语句 + 字符串模式匹配。非安全沙箱（可能被绕过），但作为防御深度的第一层有价值 |
+| **create_tool 内置工具** | Agent 通过调用 `create_tool` 工具来提议新工具，而非通过自由格式的消息"我觉得需要一个工具"。结构化的工具定义（name/description/code/language/permission_level/persistence_scope）使流程可追踪、可验证、可拒绝 | LOW | 本质上是一个 `@tool` 装饰的工具，接受 Pydantic 模型参数。完全复用现有工具执行管道 |
 
-### Anti-Features (Things to Deliberately NOT Build)
+### Anti-Features (Commonly Requested, Often Problematic)
 
-Features that seem attractive but create problems for a harness-focused framework.
+听起来好但实际有害。
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| **Full Multi-Agent Orchestration** | "More agents = more powerful." Market trend is toward multi-agent systems (AutoGen, CrewAI). | Multi-agent adds enormous complexity: inter-agent communication, agent discovery, consensus, shared state races, debugging across agents. It dilutes focus from harness depth. Single-agent with good harness is more reliable and easier to instrument. | Implement single-agent + tool composition (agents can delegate to sub-agents via tool calls). Do NOT build native multi-agent orchestration in v1. |
-| **OpenAI-Compatibility Proxy Layer** | "We should support every LLM provider from day one." Users want flexibility. | Building and maintaining an adapter layer for 50+ providers is a massive maintenance burden. Provider APIs diverge in subtle ways (tool-call format, streaming, structured output). Half-baked support is worse than no support. | Support OpenAI-compatible API only (as PROJECT.md states). Add adapters only when a specific use case demands it and can be tested. |
-| **Autonomous Tool Installation** | "Agent should install missing packages automatically." Seems convenient. | Security nightmare -- arbitrary package installation gives the agent escape vectors. Also creates reproducibility problems (different versions on different runs). | Tools declare their dependencies explicitly. Use containerized/venv execution with pre-installed deps. Fail with clear error if dep is missing. |
-| **Visual Agent Builder (Drag & Drop)** | "Non-developers should build agents visually." Attracts broader audience. | Tremendous upfront UI investment with little value for the target developer audience. DnD flows cannot express the nuanced error handling, guard policies, and execution boundaries that are loopAI's differentiators. | CLI-first + YAML/JSON configuration. Web dashboard focuses on observability, not agent construction. |
-| **Automatic Task Decomposition** | "Agent should break down complex tasks automatically." Sounds intelligent. | Without explicit decomposition boundaries, the agent creates unpredictable sub-task structures that are hard to observe, audit, or resume. Often results in planning loops that waste tokens. | Use explicit tool boundaries (the harness tool abstraction IS the decomposition primitive). Let the developer define tool granularity. |
-| **Long-Term Memory / Vector Database** | "Agent should remember everything forever." General AI trope. | Adds vector DB dependency, embedding pipeline, retrieval latency, and memory poisoning risks. For a harness-focused framework, this is scope creep that distracts from execution quality. | Focus on session-level context management first (token budgeting, summarization, trimming). Add persistent memory as a separate milestone after core harness is proven. |
+| **Agent 自主安装 pip 包** | "Agent 需要 pandas 处理数据" | smolagents `additional_authorized_imports` 导致通过 pandas 文件 I/O 实现 RCE。npm 包同样有供应链风险（Cline 5M+ 用户 token 泄露）。Agent 无法判断包安全性 | 只允许 `math`/`json`/`datetime` 等 stdlib 安全模块。如需额外功能，由用户手动安装后在代码中 import |
+| **无确认自动创建工具** | "提升效率，减少人工介入" | Datadog Security Labs 展示了 `!` 动态命令在模型审查前就执行的攻击。无确认 = 任意代码执行。即使语法正确，工具可能包含数据外泄逻辑 | 所有动态工具必须经过前端确认弹窗，展示完整代码，且确认超时（120s）自动拒绝 |
+| **AST 黑名单沙箱（进程内）** | "简单，不需要 Docker" | CVE-2026-47392 证明 AST denylist 根本不可靠——`print.__self__` 泄露 builtins，字符串拼接绕过常量检查。每次补丁都会发现新绕过 | OS 级隔离：子进程 + 子目录路径白名单 + 网络 deny-all。不依赖语言级沙箱 |
+| **动态工具允许网络访问** | "工具需要调用外部 API" | 生成代码中的网络请求 = 数据外泄通道。Agent 可以通过工具偷偷上传敏感信息 | 默认 deny-all 网络。如需 API 调用，使用静态 @tool 装饰的工具（用户编写并审查过的），动态工具通过调用现有工具间接使用网络 |
+| **Agent 修改系统级 @tool 工具** | "修复已有工具的 bug" | 静态工具是系统基础设施，由开发者审查和维护。Agent 修改它们会破坏系统完整性。且系统工具通常有复杂的权限和配置 | 动态工具只能新增或修改动态工具。系统工具（`@tool` 装饰的）为只读。Agent 可以建议修改，但需开发者手动实施 |
+| **实时自动重试修复失败工具** | "工具失败时自动修复，无需打扰用户" | 自动修复循环可能产生更危险的代码变体。无人工审查的自动迭代 = 不可控的代码演化。Anvil SDK 的 self-healing 已造成意外行为 | 工具自测失败时，Agent 可在沙箱内修复重试，但最多 3 轮后放弃并告知用户。永远不在无用户确认的情况下替换已注册工具 |
 
 ## Feature Dependencies
 
 ```
-Agent Loop (Core)
-    └──requires──> LLM Client (OpenAI-compatible API integration)
-    └──requires──> Tool Call Parsing (extract tool calls from LLM response)
-    └──requires──> Tool Result Injection (feed results back into context)
-                       └──enhances──> Streaming Output (stream each loop iteration)
+ToolMetadata 扩展 (is_dynamic, source_code, persistence_scope)
+    └──requires──> loopai.tools.types (现有)
 
-Tool System (Harness)
-    └──requires──> Tool Registration API (decorator/schema)
-    └──requires──> Tool Execution Pipeline
-                       ├──requires──> Input Validation (Pydantic schema check before execution)
-                       ├──requires──> Execution (run the actual tool function)
-                       ├──requires──> Output Normalization (wrap raw output into structured ToolResult)
-                       └──enhances──> Tool Authorization / Guard Stage (pre-execution policy check)
+ToolRegistry 扩展 (unregister, is_enabled toggle)
+    └──requires──> loopai.tools.registry (现有)
 
-Bash/Shell Tool
-    └──requires──> Tool Execution Pipeline (reuse the harness pipeline)
-    └──requires──> subprocess Execution (safe subprocess runner with timeout)
-    └──requires──> Output Capture (stdout + stderr + exit code)
-    └──enhances──> PathScope Sandbox (restrict which directories bash can access)
-    └──enhances──> Command Allow/Deny List (restrict which commands can run)
-    └──requires──> Danger Confirmation Mechanism (for rm, shutdown, dd etc.)
+DynamicToolCreator (代码校验 + AST 扫描 + 沙箱执行)
+    ├──requires──> ToolMetadata 扩展
+    ├──requires──> ToolRegistry 扩展
+    ├──requires──> ToolExecutor (现有) — 沙箱内执行验证测试
+    └──requires──> Bash 安全层 (现有) — 子进程隔离 + shell=False
 
-Error Recovery System
-    └──requires──> Structured Error Taxonomy
-    └──requires──> Agent Loop Integration (loop must handle recovery decisions)
-    └──requires──> Retry Policy Engine (configurable backoff + max attempts)
-    └──enhances──> Layered Recovery Strategy (cosmetic -> in-context -> full retry -> escalate)
-    └──enhances──> Human Escalation Path (for unrecoverable errors)
+create_tool 内置工具
+    ├──requires──> @tool 装饰器 (现有) — 工具定义的 Pydantic 校验
+    ├──requires──> DynamicToolCreator
+    └──requires──> EventBus (现有) — 发布 tool_creation_proposed 事件
 
-Context / State Management
-    └──requires──> Message Accumulator (accumulate conversation history)
-    └──requires──> Token Budget Tracker (count tokens, trigger summarization before overflow)
-    └──enhances──> Typed State (structured state with reducers, not just a message list)
-    └──enhances──> Checkpointing (save state for resume and replay)
+前端 ToolCreationDialog
+    ├──requires──> SSE 桥接 (现有) — 接收 tool_creation_proposed 事件
+    ├──requires──> ConfirmationDialog (现有模式参考)
+    └──requires──> shadcn/ui Dialog + ScrollArea + Badge (现有)
 
-Observability Web Dashboard
-    └──requires──> Event Bus / Hook System (instrument Agent Loop + Tool Pipeline + Error Recovery)
-    └──requires──> Event Serialization (convert internal events to JSON for frontend)
-    └──requires──> WebSocket / SSE Endpoint (push real-time events to frontend)
-    └──enhances──> Session Replay (replay past sessions in dashboard)
-    └──enhances──> Agent State Snapshot (full state dump for debugging)
+工具自测验证 (write test → execute → validate)
+    ├──requires──> DynamicToolCreator — 语法校验通过后才自测
+    ├──requires──> Bash 安全层 (现有) — pytest 在沙箱子进程中执行
+    └──requires──> CircuitBreaker (现有) — 自测循环熔断保护
 
-Guard Stage Pipeline
-    └──requires──> Tool Execution Pipeline (hooks before/after execution)
-    └──requires──> Budget Tracking (token, cost, rate-limit counters)
-    └──enhances──> Pre-Tool Guard (fail fast before expensive LLM retry)
-    └──enhances──> Post-Tool Guard (redact sensitive output)
+工具管理面板 (前端 "Dynamic Tools" tab)
+    ├──requires──> ToolRegistry.list_all() (现有，需扩展过滤动态工具)
+    ├──requires──> API 端点 (新增): GET/PATCH/DELETE /tools/dynamic
+    └──requires──> shadcn/ui Tabs + Card + Badge (现有)
 
-Human-in-the-Loop
-    └──requires──> Execution Pause Mechanism (interrupt agent loop, wait for confirmation)
-    └──requires──> State Persistence (preserve state across pause/resume)
-    └──requires──> Approval/Rejection API (user-facing endpoint to respond)
-    └──enhances──> Bash Danger Confirmation (confirm before rm, dd, etc.)
+工具更新 + diff 展示
+    ├──requires──> ToolRegistry (现有) — 查找现有工具
+    └──requires──> Python difflib (stdlib)
+
+list_tools 工具
+    ├──requires──> ToolRegistry.list_all() + get_schemas() (现有)
+    └──requires──> prompt_builder (现有) — 注入动态工具摘要
+
+工具持久化 (三级)
+    ├──requires──> DynamicToolCreator
+    └──requires──> 文件系统 IO (stdlib)
 ```
 
 ### Dependency Notes
 
-- **Agent Loop is the root dependency.** Nothing works without the core ReAct cycle. The loop must be designed with hook points from the start -- retrofitting hooks is expensive.
-- **Tool Pipeline requires Input Validation before Execution.** Tool execution without input validation is fragile. Pydantic schema validation is the first line of defense.
-- **Error Recovery depends on Structured Error Taxonomy.** Without classifying errors, recovery is a blind gamble (always retry vs always fail). The taxonomy drives the strategy.
-- **Observability Dashboard depends on Event Bus.** The dashboard is worthless without instrumentation points in the agent loop, tool pipeline, and error recovery. The event bus must be designed upfront.
-- **Bash Danger Confirmation depends on Human-in-the-Loop.** The confirmation mechanism for dangerous commands repurposes the same pause/resume infrastructure.
-- **Checkpointing enables Replay and Human-in-the-Loop.** Both features require saving and restoring agent state at arbitrary points.
+- **DynamicToolCreator requires ToolExecutor:** 工具自测时，Agent 生成的 pytest 代码需要在沙箱子进程中执行。ToolExecutor 提供超时控制、错误分类、结果包装。
+- **ToolCreationDialog enhances ConfirmationDialog:** 复用相同的 Dialog/DialogContent/DialogFooter UI 组件 + 超时自动拒绝 + SSE 事件驱动模式，但内容从命令确认变为代码审查。
+- **list_tools 与 prompt_builder 协同:** `prompt_builder.build_system_prompt()` 注入动态工具概要，`list_tools` 工具返回完整 JSON Schema 详情。减少 token 消耗（借鉴 Koda 的 DiscoverTools 模式）。
+- **工具自测验证 requires CircuitBreaker:** 防止 Agent 在修复→验证循环中陷入无限重试。
 
 ## MVP Definition
 
-### Launch With (v1)
+### Launch With (v1.1)
 
-What constitutes a working ReAct agent with harness engineering for the disk space diagnosis and cleanup validation scenario.
+核心流程：Agent 提议工具 → 校验 → 用户确认 → 注册执行为最小可行产品。
 
-- [x] **ReAct Agent Loop Core** -- LLM reasons, calls tools, observes results, loops. Parses tool calls from OpenAI-compatible response format. Correctly injects tool results as new messages. Terminates when LLM produces final answer or hits max iterations.
-- [x] **Tool Registration API** -- Simple `@tool` decorator that converts a Python function into an agent tool. Infers JSON schema from type hints. Reads docstring for LLM description. Registers tool in a central registry.
-- [x] **Tool Execution Pipeline** -- Unified path for all tool calls: validate inputs -> execute -> normalize result -> return to loop. Returns structured `ToolResult(error, output, metadata)` rather than raw strings.
-- [x] **Bash/Shell Tool** -- A `BashTool` that executes shell commands via `subprocess` with: configurable timeout, stdout/stderr capture, exit code reporting. Must be registered through the standard tool pipeline so it inherits guards and hooks.
-- [x] **Bash Danger Confirmation** -- Before executing a dangerous command (rm, dd, mkfs, etc.), pause the agent, surface the exact command to the user, wait for confirmation, then resume or skip. Implemented via the Human-in-the-Loop mechanism.
-- [x] **Error Taxonomy (Initial)** -- At minimum: `TransientError` (retriable: network, rate-limit), `ToolExecutionError` (tool logic failure), `GuardViolationError` (policy blocked), `FatalError` (non-recoverable). Each carries structured metadata for the recovery system.
-- [x] **Basic Retry on Transient Errors** -- Automatic retry with configurable max attempts and exponential backoff + jitter for `TransientError`. Must not retry `FatalError` or `GuardViolationError`.
-- [x] **Streaming Agent Loop** -- Stream each loop iteration (thought -> tool call -> result -> next thought) via async generator/SSE. Enables real-time observation of agent reasoning.
-- [x] **Event Bus / Hook System** -- Instrument Agent Loop, Tool Pipeline, and Error Recovery with emit points. Events carry structured payloads (type, timestamp, data, metadata). Must be designed upfront (cannot retrofit cleanly).
-- [x] **Real-Time Web Dashboard** -- Web UI that displays live agent execution: streaming thought chain, tool call timeline (input/output/duration/status), error events, token counters. Updates via WebSocket/SSE. Must support basic session history browsing.
-- [x] **Context Window Management** -- Track token usage per session. Before approaching model context limit, trigger summarization of oldest messages or drop with a warning. Prevent silent truncation of tool results.
-- [x] **OpenAI-Compatible API Only** -- Connect to any OpenAI-compatible endpoint (official OpenAI, Azure, local LLMs with OpenAI proxy like Ollama/vLLM/LM Studio). Configurable base URL, API key, model name.
+- [ ] **ToolMetadata 扩展** — 添加 `is_dynamic: bool`, `source_code: str`, `persistence_scope: str`, `enabled: bool` 字段。基础依赖。
+- [ ] **代码语法校验** — `ast.parse()` (Python) / `bash -n` (Bash)。基础设施。
+- [ ] **DynamicToolCreator** — 接受 LLM 生成的代码字符串，执行语法校验 + 危险模块 AST 扫描，生成 ToolMetadata。
+- [ ] **create_tool 内置工具** — Agent 通过结构化工具调用提议新工具。接受 name/description/code/language/permission_level/persistence_scope 参数。
+- [ ] **ToolRegistry 扩展** — 添加 `unregister()`、`is_disabled` 检查，支持动态工具的注册/注销。
+- [ ] **ToolCreationDialog（前端）** — 展示代码（语法高亮）、持久化级别选择、目录权限、审批/拒绝按钮。复用 ConfirmationDialog 的超时自动拒绝模式。
+- [ ] **工具持久化（基础）** — 沙箱级持久化（`.sandbox/tools/`）。MVP 不需要三级，先做一个可靠的单级。
+- [ ] **list_tools 工具** — 返回所有已注册工具的名称 + 描述 + 参数 Schema。
+- [ ] **system prompt 动态工具注入** — `prompt_builder` 注入动态工具概要。
 
-### Add After Validation (v1.x)
+### Add After Validation (v1.1.x)
 
-Features to add once the core agent + dashboard is working and the disk cleanup scenario is verified end-to-end.
-
-- [ ] **Execution Boundaries (PathScope)** -- Restrict BashTool to specific directories. Prevent `../../` escape. Block access to `/etc`, `/sys`, `/proc` unless explicitly configured.
-- [ ] **Command Allow/Deny Lists** -- Configure which commands BashTool can run (allow: df, du, find, ls; deny: rm, dd without confirmation override). Replaces the hardcoded danger list.
-- [ ] **Layered Self-Healing Recovery** -- Full recovery pipeline: (1) cosmetic repair of malformed tool input -> (2) in-context retry with error description -> (3) full retry with backoff -> (4) human escalation. Automatically classify into the right layer.
-- [ ] **Guard Stage Pipeline** -- Pre/post hooks for: token budget (cap), cost budget (cap), rate-limit (queue/throttle), content safety (input/output scanning). Fail fast before expensive LLM call.
-- [ ] **Session Replay** -- Save complete agent session (all events + state). Replay in dashboard with step-forward/backward controls. Critical for debugging agent behavior after the fact.
-- [ ] **Human-in-the-Loop Approval Gates** -- Generic pause/resume mechanism. Any tool can declare itself `requires_approval=True`. Agent pauses before execution, waits for user response via dashboard or CLI. State is preserved across pause.
-- [ ] **Typed State (Beyond Message List)** -- Structured agent state with typed fields (current task, files modified, tool call history). Use reducers for conflict resolution. Enables cleaner checkpointing and state inspection.
-- [ ] **Checkpointing** -- Persist agent state at key points (after each loop iteration). Resume from last checkpoint on crash. Enables human-in-the-loop and session replay as side effects.
-- [ ] **Token-Cost Tracking in Dashboard** -- Real-time display of per-tool and cumulative token usage, estimated cost, number of LLM calls per session. Helps developers optimize agent prompts and tool design.
+- [ ] **工具自测验证** — 语法校验通过后，Agent 写 pytest 用例 → 沙箱执行 → 最多 3 轮迭代修复。触发条件：基础流程稳定，用户反馈审查负担重。
+- [ ] **三级持久化** — 会话级 / 沙箱级 / 项目级。触发条件：用户需要更细粒度的工具生命周期控制。
+- [ ] **工具管理面板** — 前端 "Dynamic Tools" tab：查看所有动态工具代码、启用/禁用、删除。触发条件：工具数量超过 5 个，需要批量管理。
+- [ ] **工具更新 + diff** — Agent 修改已有工具 → diff 展示 → 用户选择覆盖/拒绝。触发条件：首次出现工具修改需求。
 
 ### Future Consideration (v2+)
 
-Features to defer until the harness engineering value is proven with real developer usage.
-
-- [ ] **Tool Speculative Execution** -- Pre-execute likely next tools while LLM generates. Requires idempotency analysis and execution rollback. High risk, high reward.
-- [ ] **Causal Provenance (Ablation)** -- Leave-one-out analysis of tool calls. Requires full session replay infrastructure and the ability to re-run without specific tools.
-- [ ] **Fuzz Testing for Custom Tools** -- Developer tool that auto-generates test cases for registered tools using property-based testing (Hypothesis). Helps find edge cases.
-- [ ] **Multi-Agent via Tool Composition** -- Agents as tools: one agent delegates sub-tasks to another agent via tool call. NOT full multi-agent orchestration -- just agent-as-tool pattern.
-- [ ] **Long-Term Memory (Vector DB)** -- Persistent memory across sessions. High complexity, high scope risk. Only after session-level context management is solid.
-- [ ] **Provider Adapters (Anthropic, Gemini, Local)** -- Support additional LLM providers. Each adapter requires tool-call format handling (each provider has different tool-calling schemas). Add on demand, not proactively.
+- [ ] **工具评分/使用统计** — 记录每个动态工具的调用次数、成功率、平均延迟，自动建议禁用低质量工具。
+- [ ] **工具模板库** — 用户可以从预定义模板创建工具（如"API 调用工具"、"文件处理工具"），降低 LLM 生成错误率。
+- [ ] **跨会话工具共享** — 多个会话协同使用同一组动态工具，带权限控制。
 
 ## Feature Prioritization Matrix
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| ReAct Agent Loop Core | HIGH | MEDIUM | P1 |
-| Tool Registration API | HIGH | LOW | P1 |
-| Tool Execution Pipeline | HIGH | MEDIUM | P1 |
-| Bash/Shell Tool | HIGH | LOW | P1 |
-| Bash Danger Confirmation | HIGH | LOW | P1 |
-| Error Taxonomy (Initial) | HIGH | LOW | P1 |
-| Basic Retry on Transient Errors | MEDIUM | LOW | P1 |
-| Streaming Agent Loop | HIGH | MEDIUM | P1 |
-| Event Bus / Hook System | HIGH | MEDIUM | P1 |
-| Real-Time Web Dashboard | HIGH | HIGH | P1 |
-| Context Window Management | HIGH | MEDIUM | P1 |
-| OpenAI-Compatible API Only | HIGH | LOW | P1 |
-| Execution Boundaries (PathScope) | MEDIUM | MEDIUM | P2 |
-| Command Allow/Deny Lists | MEDIUM | LOW | P2 |
-| Layered Self-Healing Recovery | HIGH | HIGH | P2 |
-| Guard Stage Pipeline | MEDIUM | MEDIUM | P2 |
-| Session Replay | HIGH | HIGH | P2 |
-| Human-in-the-Loop Approval Gates | HIGH | MEDIUM | P2 |
-| Typed State (Beyond Message List) | MEDIUM | HIGH | P2 |
-| Checkpointing | MEDIUM | HIGH | P2 |
-| Token-Cost Tracking in Dashboard | LOW | MEDIUM | P2 |
-| Tool Speculative Execution | LOW | VERY HIGH | P3 |
-| Causal Provenance (Ablation) | MEDIUM | VERY HIGH | P3 |
-| Fuzz Testing for Custom Tools | LOW | MEDIUM | P3 |
-| Multi-Agent via Tool Composition | MEDIUM | HIGH | P3 |
-| Long-Term Memory (Vector DB) | LOW | HIGH | P3 |
-| Provider Adapters | LOW | MEDIUM | P3 |
-
-**Priority key:**
-- P1: Must have for launch -- without these, the validation scenario (disk space diagnosis) cannot be demonstrated
-- P2: Should have, add after core loop is working -- these are the harness engineering differentiators
-- P3: Nice to have, future consideration -- do not build until harness value is proven
+| ToolMetadata 扩展 | HIGH — 所有后续功能依赖 | LOW | P1 |
+| 代码语法校验 | HIGH — 无此则不可用 | LOW | P1 |
+| DynamicToolCreator + AST 扫描 | HIGH — 核心创建逻辑 | MEDIUM | P1 |
+| create_tool 内置工具 | HIGH — Agent 入口 | LOW | P1 |
+| ToolRegistry 扩展 (unregister/enabled) | HIGH — 注册管线 | LOW | P1 |
+| ToolCreationDialog（前端） | HIGH — 用户交互入口 | MEDIUM | P1 |
+| 工具持久化（基础） | HIGH — 无持久化无意义 | LOW | P1 |
+| list_tools 工具 | MEDIUM — Agent 需要发现 | LOW | P1 |
+| system prompt 注入 | MEDIUM — Agent 需要知道 | LOW | P1 |
+| 工具自测验证 | HIGH — 核心差异化 | HIGH | P2 |
+| 三级持久化 | MEDIUM — 灵活性提升 | MEDIUM | P2 |
+| 工具管理面板 | MEDIUM — 规模化需要 | MEDIUM | P2 |
+| 工具更新 + diff | MEDIUM — 迭代需要 | MEDIUM | P2 |
+| 工具评分/使用统计 | LOW | HIGH | P3 |
+| 工具模板库 | LOW | HIGH | P3 |
+| 跨会话工具共享 | LOW | HIGH | P3 |
 
 ## Competitor Feature Analysis
 
-| Feature | LangChain / LangGraph | OpenAI Agents SDK | SmolAgents (HF) | PydanticAI | loopAI (Plan) |
-|---------|----------------------|-------------------|-----------------|------------|---------------|
-| **ReAct Loop** | Via AgentExecutor or LangGraph | Via Runner.run_sync() | Native CodeAgent/ToolCallingAgent | Via Agent.run() | Custom, minimal, with hook points |
-| **Tool Decorator** | `@tool` with args schema | `@function_tool` | `@tool` decorator | `@agent.tool` | `@tool` decorator, harness-aware |
-| **Tool Pipeline** | Direct function call | Direct function call + guardrails | Direct function call | Direct function call | 4-stage pipeline: discover -> auth -> execute -> handle |
-| **Bash/Shell Tool** | Third-party only | ShellTool in sandbox | LocalPythonInterpreter | Not built-in | First-class BashTool with harness wrapping |
-| **Error Taxonomy** | Basic error types | Retry on API errors | Minimal | Pydantic validation errors | Structured 4-category taxonomy |
-| **Layered Recovery** | LangGraph node error_handler (v1.2+) | Tool guardrails (either allow or skip) | Minimal | Validation retry loop | 4-layer recovery: cosmetic -> in-context -> full retry -> escalate |
-| **Execution Boundaries** | Not built-in | SandboxAgent (container) | E2B/Docker backends | Not built-in | PathScope + Command allow/deny |
-| **Observability Dashboard** | LangSmith (proprietary SaaS) | Built-in tracing UI | No dashboard | Logfire (proprietary) | Open-source, self-hosted, real-time |
-| **Human-in-the-Loop** | LangGraph interrupt_before | Tool approval gates | Not built-in | Not built-in | Generic pause/resume + danger confirmation |
-| **State Management** | Typed StateGraph with reducers | Session-based message history | Minimal (in-memory) | RunContext DI | Typed state with checkpointing (v1.x) |
-| **Checkpointing** | Full persistence system | Redis sessions | Not built-in | Not built-in | Key-point checkpointing (v1.x) |
-| **Session Replay** | LangSmith only | Not built-in | Not built-in | Not built-in | Built-in replay in dashboard (v1.x) |
-| **Guard Stage Pipeline** | Callback system (scattered) | Input/output guardrails | Not built-in | Not built-in | Structured pre/post guard stages (v1.x) |
-| **Multi-Agent** | First-class (LangGraph) | First-class (handoffs) | Via ManagedAgent | Via agent-as-tool | Agent-as-tool only (v2+) |
-| **Provider Support** | Many adapters | OpenAI + 100 via adapters | Best-in-class (100+) | 40+ providers | OpenAI-compatible only |
-
-## Phase-to-Feature Mapping (Roadmap Implications)
-
-| Phase Theme | Features Included | Rationale |
-|-------------|-------------------|-----------|
-| **Phase 1: Core Loop** | ReAct Agent Loop, Tool Registration, Tool Execution Pipeline, OpenAI-compatible LLM Client, Streaming Output, Basic Context Management | Establish the foundation. Without a running agent loop, nothing else matters. Must demo "agent calls df, reads output, decides next step" end-to-end. |
-| **Phase 2: Tool Harness** | BashTool, Bash Danger Confirmation, Error Taxonomy, Basic Retry, Event Bus | Add the first real tool (bash) with safety and reliability. The event bus is the observability foundation -- must be built before the dashboard. |
-| **Phase 3: Observability** | Real-Time Web Dashboard, Token/Budget Tracking in UI, Session History | Build the WebSocket-backed dashboard that visualizes what Phase 1+2 produce. This is loopAI's flagship differentiator. |
-| **Phase 4: Resilience** | Layered Recovery, Guard Stage Pipeline, Execution Boundaries (PathScope), Command Allow/Deny Lists | Deepen the harness. Add self-healing and execution safety. Makes the agent production-ready for the disk cleanup scenario. |
-| **Phase 5: State & Replay** | Typed State, Checkpointing, Session Replay, Human-in-the-Loop Approval Gates | Add state persistence and debugging superpowers. Enables time-travel debugging and safe human oversight of dangerous operations. |
+| Feature | Anvil SDK | AutoLearn (MCP) | Meta-Tools & Agents | OpenAI Agents SDK | Our Approach |
+|---------|-----------|-----------------|---------------------|-------------------|--------------|
+| 代码语法校验 | 隐式（运行时失败） | 无显式校验 | 有（editor + shell 调试） | 无（不是动态工具框架） | 显式 `ast.parse()` + `bash -n` |
+| 用户确认 | 无（JIT 自动生成） | 无（自动注册） | 有（editor 模式手动） | N/A | 强制确认弹窗 + 超时自动拒绝 |
+| 沙箱隔离 | 无 | MCP 服务端隔离 | 无（进程内） | N/A | 子进程 + 子目录 + 禁网 |
+| 工具自测 | 无 | 无 | 有（shell 手动调试） | N/A | Agent 自动写 pytest + 执行 + 迭代修复 |
+| 持久化 | 文件系统（单级） | SQLite（单级） | LangGraph checkpoint | N/A | 三级（会话/沙箱/项目） |
+| 工具发现 | 无内置 list | MCP 协议 list | 语义搜索 + 向量化 | N/A | system prompt 概要 + list_tools 详情 |
+| 工具更新 | self-healing 自动修复 | 无 | editor 手动修改 | N/A | diff 展示 + 用户选择 |
+| 与现有工具系统集成 | 独立系统 | 独立 MCP 协议 | 独立系统 | N/A | **复用 @tool/ToolRegistry/ToolExecutor 全部基础设施** |
 
 ## Sources
 
-- [LangChain Agent Documentation](https://docs.langchain.com/) -- Agent loop, tool calling, callback system (HIGH confidence)
-- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/) -- StateGraph architecture, checkpointing, streaming (HIGH confidence)
-- [LangGraph v1.2.0 Changelog](https://www.langchain.com/blog/january-2026-langchain-newsletter) -- Node timeout, error_handler, Delta Channels (HIGH confidence)
-- [OpenAI Agents SDK GitHub](https://github.com/openai/openai-agents-python) -- Guardrails, tool approval, tracing, sandbox agents (HIGH confidence)
-- [SmolAgents GitHub](https://github.com/huggingface/smolagents) -- CodeAgent, tool decorator, multi-LLM support (HIGH confidence)
-- [PydanticAI Documentation](https://github.com/pydantic/pydantic-ai) -- Type-safe agents, validation retry, RunContext DI (HIGH confidence)
-- [harness-engineering Toolbox](https://github.com/dr-gareth-roberts/harness-engineering) -- Tool abstraction, PathScope, ReplayRunner, speculative execution, fuzzing (MEDIUM confidence -- newer project, less community validation)
-- [MiniHarness Guide](https://yeasy.gitbook.io/harness_engineering_guide) -- 4-stage tool pipeline, error-first design (MEDIUM confidence -- guide, not production framework)
-- [pyarnes Template](https://github.com/Cognitivemesh/pyarnes) -- Error taxonomy, lifecycle FSM, guardrails (MEDIUM confidence -- template project)
-- [geny-executor](https://pypi.org/project/geny-executor/) -- 16-stage pipeline, dual abstraction, guard stages (MEDIUM confidence -- small project)
-- [AgentField HarnessRunner](https://github.com/Agent-Field/agentfield/issues/201) -- 4-layer schema recovery, retry with backoff (LOW confidence -- issue discussion, not released)
-- [AgentDiagnose Toolkit](https://aclanthology.org/2025.emnlp-demos.15.pdf) -- t-SNE action plots, navigation graphs for agent debugging (MEDIUM confidence -- academic paper)
-- [Honeycomb Agent Timeline](https://www.thefastmode.com/technology-solutions/48504-honeycomb-unveils-agent-timeline-canvas-agent-skills-for-ai-observability) -- Multi-agent trace visualization (MEDIUM confidence -- press release, not hands-on)
+- [Anvil SDK — JIT tool generation from intent](https://pypi.org/project/anvil-agent/) — MEDIUM confidence (PyPI listing)
+- [Meta-Tools-and-Agents — dynamic tool loading + editor pattern](https://github.com/madhurprash/meta-tools-and-agents) — MEDIUM confidence (GitHub)
+- [Agent Builder — define_tool at runtime](https://github.com/builtbyV/agent-builder) — MEDIUM confidence (GitHub)
+- [Microsoft Agent Framework + CodeAct + Hyperlight microVM](https://devblogs.microsoft.com/agent-framework/codeact-with-hyperlight/) — HIGH confidence (official Microsoft devblog)
+- [AutoLearn MCP — natural language to Python skill](https://pypi.org/project/iflow-mcp_autolearnai-autolearn/) — LOW confidence (PyPI, minimal documentation)
+- [Koda — DiscoverTools lazy loading pattern (57% token reduction)](https://github.com/lijunzh/koda/issues/154) — MEDIUM confidence (GitHub issue)
+- [mini_claw — list_tools() for prompt injection](https://docs.rs/mini_claw/0.1.15/mini_claw/tools/index.html) — MEDIUM confidence (docs.rs)
+- [Pydantic AI — Tool constructor for dynamic registration](https://ai.pydantic.dev/) — HIGH confidence (official documentation)
+- [OpenAI Agents SDK — @function_tool decorator + defer_loading](https://github.com/openai/openai-agents-python/blob/0a100fb1/docs/tools.md) — HIGH confidence (official GitHub)
+- [CVE-2026-47392 — AST denylist sandbox bypass proof](https://github.com/advisories/GHSA-4mr5-g6f9-cfrh) — HIGH confidence (GitHub Advisory Database)
+- [smolagents CodeAgent — insecure import whitelist RCE](https://www.fox-it.com/be/autonomous-ai-agents-a-hidden-risk-in-insecure-smolagents-codeagent-usage/) — HIGH confidence (Fox-IT security research)
+- [Datadog Security Labs — dynamic context shell execution bypass](https://securitylabs.datadoghq.com/articles/malicious-skills-supply-chain-risks-in-coding-agents-with-dynamic-context/) — HIGH confidence (Datadog official)
+- [DryRun Security — 87% of AI agent PRs contain vulnerabilities](https://www.helpnetsecurity.com/2026/03/13/claude-code-openai-codex-google-gemini-ai-coding-agent-security/) — MEDIUM confidence (industry study)
+- [AI Agent Sandbox Security — 5-layer isolation model](https://www.sourcetrail.com/python/execution-sandboxes-for-ai-agents-architecture-risks-and-real-world-patterns/) — MEDIUM confidence (technical blog)
+- [sandbox-exec — macOS sandbox profiles for AI agents](https://www.morphllm.com/ai-agent-sandbox) — MEDIUM confidence (vendor blog)
+- [Replit Agent 3 — dual-agent self-testing (200+ min autonomous)](https://www.guvi.in/blog/replit-agent-self-testing/) — LOW confidence (educational blog, not primary source)
+- [Spec Guard — 6-gate methodology with failure-first test (Gate 4)](https://www.npmjs.com/package/@jpstone/spec-guard) — LOW confidence (npm package, minimal docs)
+- [loopAI 现有代码库 — ToolRegistry, ToolExecutor, EventBus, ConfirmationDialog](file://src/loopai/) — HIGH confidence (primary source, 已读取)
 
 ---
-*Feature research for: ReAct AI Agent with Harness Engineering (loopAI)*
-*Researched: 2026-05-27*
+*Feature research for: Agent 动态工具创建系统*
+*Researched: 2026-05-31*

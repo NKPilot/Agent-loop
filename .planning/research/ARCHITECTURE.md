@@ -1,594 +1,537 @@
-# Architecture Research: ReAct Agent Harness System
+# Architecture Research: Agent 动态工具创建系统
 
-**Domain:** AI Agent framework with harness engineering focus
-**Researched:** 2026-05-27
-**Confidence:** HIGH (confirmed across multiple production implementations including OpenAI Agents SDK, LangGraph, dataact, AG2, Microsoft Agent Framework)
+**Domain:** Agent 动态工具创建 -- 集成到现有 ReAct Agent 架构
+**Researched:** 2026-05-31
+**Confidence:** HIGH (基于现有代码库的精确对接点分析 + 生态系统中其他动态工具框架的模式参考)
 
-## Standard Architecture
-
-### System Overview
-
-The architecture follows a **layered harness** pattern where each layer wraps and constrains the layer below, and all layers feed events upward to observability:
+## System Overview -- 现有架构 + 新增组件集成
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                    OBSERVABILITY LAYER                            │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
-│  │ Web Frontend │  │ SSE/WS Event │  │ JSONL Logger +       │  │
-│  │ (React/SSE)  │  │ Stream       │  │ Langfuse / Traces    │  │
-│  └──────┬───────┘  └──────┬───────┘  └───────────┬───────────┘  │
-├─────────┴─────────────────┴─────────────────────┴───────────────┤
-│                    ERROR RECOVERY LAYER                           │
-│  ┌──────────────────────┐  ┌────────────────────────────────┐   │
-│  │ Checkpoint Manager   │  │ Loop Detector + Retry Chain    │   │
-│  ├──────────────────────┤  ├────────────────────────────────┤   │
-│  │ Serializes state to  │  │ Detects infinite loops,        │   │
-│  │ disk/S3; enables     │  │ applies domain-aware recovery  │   │
-│  │ pause/resume after   │  │ (error re-injection)           │   │
-│  │ crash                │  │                                │   │
-│  └──────────────────────┘  └────────────────────────────────┘   │
-├──────────────────────────────────────────────────────────────────┤
-│                    CONTEXT MANAGEMENT LAYER                        │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Token Tracker │ Compaction Engine │ Overflow File Store  │  │
-│  │  (tiktoken)    │ (85-92% threshold)│ (>80K chars)          │  │
-│  └─────────────────────────┬──────────────────────────────────┘  │
-│                            │ appends                             │
-├────────────────────────────┴─────────────────────────────────────┤
-│                    TOOL ABSTRACTION LAYER                          │
-│  ┌───────────┐  ┌───────────────┐  ┌────────────────────────┐   │
-│  │ Tool Reg. │  │ Sandbox Exec  │  │ Permission Middleware   │   │
-│  │ (name →   │  │ (timeout,     │  │ (safe/moderate/        │   │
-│  │  callable,│  │  size limit,  │  │  dangerous, with       │   │
-│  │  schema,  │  │  error isol.) │  │  HITL approval gates)  │   │
-│  │  tier)    │  │               │  │                        │   │
-│  └─────┬─────┘  └───────┬───────┘  └───────────┬────────────┘   │
-│        └────────────────┴──────────────────────┘                 │
-│                            │ calls                                │
-├────────────────────────────┴─────────────────────────────────────┤
-│                    AGENT LOOP (CORE)                               │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  State Machine: START → REASON → ACT → OBSERVE → FINISH   │  │
-│  │                                   └── ERROR ←────────────  │  │
-│  │  Provider Adapter: OpenAI / Anthropic / Compatible          │  │
-│  │  Max iterations: configurable (50-100), budget tracking     │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                            │ reads                                │
-├────────────────────────────┴─────────────────────────────────────┤
-│                    MESSAGE HISTORY (Append-Only Store)             │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  List[Message] — system prompt + user msgs + tool calls    │  │
-│  │  + results. Nothing is ever mutated; append-only design    │  │
-│  │  for KV-cache reuse (>80% hit rate) and clean audit trail  │  │
-│  └────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Frontend (React + Zustand)                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌───────────────┐  ┌──────────────────────┐  ┌─────────────────────────┐  │
+│  │ ToolManager   │  │ ToolCreationDialog    │  │ ConfirmationDialog      │  │
+│  │ Tab (新增)     │  │ (新增)                │  │ (已有, 复用)             │  │
+│  └───────┬───────┘  └──────────┬───────────┘  └───────────┬─────────────┘  │
+│          │                     │                          │                 │
+│  ┌───────┴─────────────────────┴──────────────────────────┴─────────────┐  │
+│  │                    Zustand Stores (扩展)                              │  │
+│  │  uiStore: + pendingToolCreation, toolCreationTab                      │  │
+│  │  eventStore: 处理 tool_creation_* 事件                                │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                           SSE Bridge (已有)                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          FastAPI REST API                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────────────┐  ┌──────────────────────────────────┐ │
+│  │ Control Routes (扩展)             │  │ New: Tool Management Routes     │ │
+│  │ POST confirm_tool_creation (新增) │  │ GET  /tools/dynamic             │ │
+│  │ POST confirm_tool_update (新增)   │  │ PUT  /tools/dynamic/{name}      │ │
+│  │ POST confirm (已有, 复用)          │  │ DELETE /tools/dynamic/{name}    │ │
+│  └──────────────────────────────────┘  └──────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                            EventBus (已有)                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │ 新增事件:                                                             │   │
+│  │ tool_creation_requested, tool_creation_confirmed, tool_created,       │   │
+│  │ tool_creation_failed, tool_update_requested, tool_update_confirmed    │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                     ReActFSM (扩展 ACT 状态处理)                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌───────────────┐  ┌───────────────────┐  ┌────────────────────────────┐  │
+│  │ 已有: ToolReg  │  │ 新增: DynamicTool │  │ 已有: ToolExecutor          │  │
+│  │   istry       │  │  Creator          │  │                             │  │
+│  │               │  │ (generate_tool →  │  │ execute() → 动态工具        │  │
+│  │ register_meta │  │  语法检查 →       │  │                             │  │
+│  │ ()            │  │  EventBus →等待)  │  │                             │  │
+│  └───────────────┘  └───────────────────┘  └────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                       沙箱层 (新增)                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │  SandboxExecutor: subprocess + 子目录隔离 + 网络禁止 + 独立超时       │   │
+│  │  DangerousModuleScanner: AST 扫描禁止的 import (os.system, subprocess │   │
+│  │   , socket, ctypes, importlib, builtins.__import__)                   │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                     持久化层 (新增)                                          │
+│  ┌──────────────┐  ┌──────────────────┐  ┌─────────────────────────────┐  │
+│  │ 会话级        │  │ 沙箱级            │  │ 项目级                       │  │
+│  │ (内存 dict)   │  │ (.sandbox/       │  │ (src/loopai/tools/dynamic/  │  │
+│  │ session结束   │  │  tools/*.py)     │  │  *.py, 持久化)              │  │
+│  │ 即消失        │  │ session结束保留  │  │                              │  │
+│  └──────────────┘  └──────────────────┘  └─────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Component Responsibilities
+## Component Responsibilities
 
-| Component | Responsibility | Typical Implementation |
-|-----------|----------------|------------------------|
-| **Agent Loop** | State machine managing the ReAct cycle (REASON → ACT → OBSERVE). Controls iteration budget, delegates to Provider Adapter. | Python state machine (Enum + dataclass for context). `while` loop over states, not raw `while` over turns. |
-| **Provider Adapter** | Normalized interface to LLM providers. Converts internal message format to provider SDK, handles streaming vs non-streaming. | `def get_response(messages, tools) -> Response`. Subclasses for OpenAI, Anthropic. FakeAdapter for tests. |
-| **Tool Registry** | Central registry mapping tool names to callable + schema + metadata (permission tier, domain tag). Supports progressive disclosure. | `dict[str, ToolDef]` where ToolDef is a Pydantic model with `name`, `description`, `parameters` (JSON Schema), `func`, `permission_tier`. |
-| **Sandbox Executor** | Safe tool execution with timeout, result size limits, exception isolation per tool. | `asyncio.wait_for(func(**args), timeout=30.0)`. Catches exceptions and returns error as tool result (error re-injection). |
-| **Permission Middleware** | Intercepts tool requests and enforces tier-based approval: safe (auto), moderate (whitelist check), dangerous (HITL gate). | Middleware wrapping every tool call. Tier 3 pauses loop, surfaces UI, resumes on human approval. |
-| **Context Manager** | Tracks total token count via tiktoken. Triggers compaction at 85-92% threshold. Manages file-based overflow for large outputs. | `count_tokens(messages)` → if > threshold: `compact(messages)` via summarization (preserving tool call+result pairs). |
-| **Checkpoint Manager** | Serializes full agent state (message history, task pointer, tool permission log) to disk at each iteration. Enables crash recovery. | Serialize to `session-state.json` at every iteration. On restart, detect last checkpoint and resume. Git checkpoints for code tasks. |
-| **Loop Detector** | Detects infinite/dead loops via similar-call counting, output similarity, progress audits (no state change across N turns). | Track hash of tool call signatures. If same call seen >3 times in 60s, trigger recovery (summarize, ask LLM to change approach). |
-| **Error Re-injector** | On tool failure (error, timeout, invalid params), returns structured error back into LLM context for self-correction. | Tool execution returns `{"error": True, "message": "...", "guidance": "try X instead"}` as tool result. |
-| **Event Emitter** | Emits structured events at every state transition, tool call, permission check, compaction event. Feeds both JSONL logger and streaming web frontend. | Python callback or asyncio queue. Each event: `{type, timestamp, session_id, step, data}`. |
-| **JSONL Logger** | Appends every turn (with latency, token counts, cache hit/miss) to a structured log file from first turn. Never retrofitted. | `logging` or `json.dumps` per line. Rotating files. |
-| **SSE/WebSocket Stream** | Pushes real-time agent state to web frontend: current state, tool calls (with status badges), thoughts, errors. | Async generator → asyncio.Queue → WebSocket/SSE → frontend EventSource. |
-| **Web Frontend** | Real-time visualization of agent reasoning chain, tool calls, state transitions, approval gates. | React (or similar) consuming SSE events. Timeline / graph / compact views. |
+| Component | Responsibility | Implementation |
+|-----------|---------------|----------------|
+| **DynamicToolCreator** (新增) | Agent 调用的 generate_tool 内置工具；接收代码字符串 → 语法检查 → 发布事件 → 等待确认 → 注册到 ToolRegistry | `loopai/tools/dynamic_creator.py` |
+| **SandboxExecutor** (新增) | 子目录隔离执行 Python/Bash 代码；禁止网络、文件系统限制、独立超时 | `loopai/tools/sandbox.py` |
+| **DangerousModuleScanner** (新增) | AST 扫描 Python 代码中的危险 import/调用 | `loopai/tools/sandbox.py` 内嵌 |
+| **ToolPersistenceManager** (新增) | 三级持久化（会话/沙箱/项目）的读写操作 | `loopai/tools/tool_persistence.py` |
+| **ToolRegistry** (修改) | 已有 `register_meta()` -- 无需修改，动态工具通过相同接口注册 | 已存在 |
+| **ToolExecutor** (修改) | 识别 `tool_type == "dynamic"` 时路由到 SandboxExecutor 而非直接执行 | 轻量修改 |
+| **ReActFSM** (修改) | `_handle_act` 中为动态工具创建流程添加暂停/恢复逻辑 | 轻量修改 |
+| **EventBus schemas** (修改) | 添加 6 个新事件类型 | `loopai/events/schemas.py` |
+| **API routes** (修改) | 新增 `confirm_tool_creation`、`confirm_tool_update` 端点 + 工具管理 CRUD | `loopai/api/routes/control.py`, `loopai/api/routes/tools.py` |
+| **create_agent_components** (修改) | 工厂函数注册 generate_tool 内置工具 | `loopai/main.py` |
+| **uiStore** (修改) | 添加 `pendingToolCreation`, `toolCreationTab` 状态 | `frontend/src/stores/uiStore.ts` |
+| **eventStore** (修改) | 处理 6 个新事件类型 | `frontend/src/stores/eventStore.ts` |
+| **eventTypes** (修改) | 添加 6 个新事件类型的 TypeScript 定义 | `frontend/src/lib/eventTypes.ts` |
+| **ToolCreationDialog** (新增) | 前端确认弹窗：代码展示 + 持久化级别 + 目录权限配置 | `frontend/src/components/ToolCreationDialog.tsx` |
+| **ToolManager** (新增) | 前端工具管理 Tab：查看代码/禁用/启用/删除动态工具 | `frontend/src/components/ToolManager.tsx` |
+| **api.ts** (修改) | 添加工具管理 API 调用函数 | `frontend/src/lib/api.ts` |
 
 ## Recommended Project Structure
 
 ```
-loopai/
-├── agent/                          # Core agent harness
-│   ├── __init__.py
-│   ├── loop.py                     # ReAct state machine (Agent Loop)
-│   ├── state.py                    # AgentState enum, StepContext dataclass
-│   ├── adapters/                   # Provider abstraction
-│   │   ├── __init__.py
-│   │   ├── base.py                 # Abstract ProviderAdapter interface
-│   │   ├── openai.py               # OpenAI-compatible API adapter
-│   │   └── fake.py                 # FakeAdapter for testing
-│   └── scheduling/                 # Loop execution control
-│       ├── __init__.py
-│       ├── budget.py               # Token/cost/iteration budget tracking
-│       └── scheduling.py           # Concurrency, async runner
-│
-├── tools/                          # Tool abstraction layer
-│   ├── __init__.py
-│   ├── registry.py                 # Tool registry (name → ToolDef)
-│   ├── types.py                    # ToolDef, ToolResult, PermissionTier
-│   ├── sandbox.py                  # Safe execution (timeout, size limit, isolation)
-│   ├── permissions.py              # Permission middleware (tiers, HITL gates)
-│   └── builtin/                    # Built-in tool implementations
-│       ├── __init__.py
-│       ├── shell.py                 # Shell command execution (tier 3)
-│       ├── filesystem.py           # File I/O tools (tier 2/3)
-│       └── diagnostic.py           # Disk/CPU/port diagnostic tools (tier 1-3)
-│
-├── context/                        # Context management
-│   ├── __init__.py
-│   ├── token_tracker.py            # Token counting + threshold monitoring
-│   ├── compaction.py               # Compaction strategies (sliding window, summarization)
-│   ├── overflow.py                 # File-based overflow for large outputs
-│   └── history.py                  # Append-only message store
-│
-├── resilience/                     # Error recovery + safety
-│   ├── __init__.py
-│   ├── checkpoint.py               # State serialization + crash recovery
-│   ├── loop_detector.py            # Infinite loop detection
-│   ├── retry.py                    # Backoff + retry chain
-│   ├── error_taxonomy.py           # Error classification (5 domains)
-│   └── guardrails/                 # Safety guardrails
-│       ├── __init__.py
-│       ├── input.py                # Input filtering (prompt injection, PII)
-│       └── output.py               # Output scanning (PII redaction, safety eval)
-│
-├── observability/                  # Observability layer
-│   ├── __init__.py
-│   ├── events.py                   # Event types + emitter (central event bus)
-│   ├── logger.py                   # JSONL structured logging
-│   ├── stream.py                   # SSE/WebSocket streaming to frontend
-│   ├── metrics.py                  # Latency, token usage, error rate collection
-│   └── replay.py                   # Session replay for debugging
-│
-├── web/                            # Web frontend (React or similar)
-│   ├── index.html
-│   ├── package.json
-│   └── src/
-│       ├── App.jsx                 # Main UI shell
-│       ├── components/
-│       │   ├── AgentTimeline.jsx   # Real-time thought/action/observation timeline
-│       │   ├── ToolCallCard.jsx    # Tool call visualization with status badges
-│       │   ├── ApprovalGate.jsx    # HITL approval gate UI (dangerous operations)
-│       │   ├── StateMachine.jsx    # Current state visualization
-│       │   └── LogViewer.jsx       # Raw log stream for debugging
-│       └── hooks/
-│           └── useEventStream.js   # SSE/WebSocket consumer hook
-│
-├── examples/                       # Business verification scenarios
-│   ├── __init__.py
-│   └── disk_diagnostics.py         # Disk space diagnosis & cleanup flow
-│
-└── tests/                          # Tests mirror the source structure
-    ├── test_loop.py
-    ├── test_tools/
-    ├── test_context/
-    ├── test_resilience/
-    └── test_observability/
+src/loopai/
+├── tools/
+│   ├── dynamic_creator.py    # DynamicToolCreator (新增)
+│   ├── sandbox.py             # SandboxExecutor + DangerousModuleScanner (新增)
+│   ├── tool_persistence.py    # ToolPersistenceManager (新增)
+│   ├── dynamic/               # 项目级持久化工具存放目录 (新增)
+│   │   └── .gitkeep
+│   ├── executor.py            # (修改: dynamic tool 路由)
+│   ├── registry.py            # (无需修改: 已有 register_meta)
+│   ├── types.py               # (修改: 添加 tool_type 字段到 ToolMetadata)
+│   ├── decorator.py           # (无需修改)
+│   └── ...
+├── events/
+│   └── schemas.py             # (修改: 添加 6 个新事件模型)
+├── api/
+│   ├── routes/
+│   │   ├── control.py         # (修改: 添加 confirm_tool_creation/update 端点)
+│   │   └── tools.py           # (新增: GET/PUT/DELETE /tools/dynamic)
+│   └── schemas.py             # (修改: 添加工具管理 API 模型)
+├── state_machine/
+│   └── fsm.py                 # (修改: _handle_act 添加动态工具创建暂停/恢复)
+├── main.py                    # (修改: create_agent_components 注册 generate_tool)
+└── .sandbox/
+    └── tools/                 # 沙箱级持久化工具目录
+        └── .gitignore
+
+frontend/src/
+├── components/
+│   ├── ToolCreationDialog.tsx # (新增: 工具创建确认弹窗)
+│   ├── ToolManager.tsx        # (新增: 动态工具管理 Tab)
+│   └── ToolDetail.tsx         # (修改: 区分静态/动态工具体验)
+├── stores/
+│   ├── uiStore.ts             # (修改: 添加 pendingToolCreation 等状态)
+│   └── eventStore.ts          # (修改: 处理新事件类型)
+├── lib/
+│   ├── eventTypes.ts          # (修改: 添加新事件类型定义)
+│   └── api.ts                 # (修改: 添加工具管理 API)
+└── ...
 ```
 
 ### Structure Rationale
 
-- **agent/**: The core loop and provider adapter are the foundational components. Separating adapters from the loop enables testing and provider switching without touching the state machine.
-- **tools/**: Tool registry and sandbox execution are distinct concerns. Registry is about discoverability and metadata; sandbox is about safety. Permission middleware bridges them and connects to the agent loop's pause/resume mechanism.
-- **context/**: Self-contained with its own token counting and compaction strategies. The agent loop calls into it before each LLM call; it owns the message history and decides what to keep.
-- **resilience/**: Encompasses both error recovery (checkpoints, loop detection, retry) and proactive safety (guardrails). Co-located because both are about keeping the agent in a safe operating envelope.
-- **observability/**: The only layer that reads from all others. Events emitted by every other layer flow through a central event bus here. Web streaming and JSONL logging are separate outputs from the same event stream.
-- **web/**: Separate from the Python backend because it's a different technology and deployment model. Communicates with the backend only through the SSE/WebSocket stream and REST APIs.
+- **`tools/dynamic_creator.py`:** DynamicToolCreator 是 generate_tool 内置工具的具体实现，属于工具系统范畴。与 bash.py/disk_tools.py 同级。
+- **`tools/sandbox.py`:** 沙箱执行器和危险模块扫描器紧密耦合——扫描后执行，放到同一文件。
+- **`tools/tool_persistence.py`:** 三级持久化是独立关注点，有自己的文件系统操作和序列化逻辑。
+- **`tools/dynamic/`:** 项目级持久化工具存放为实际的 `.py` 文件，可被 Python import。初始化时扫描此目录自动注册。
+- **`.sandbox/tools/`:** 沙箱级持久化工具存放在 `.sandbox/` 下（已有 `.sandbox/overflow/` 目录），与项目保持一致。
+- **`api/routes/tools.py`:** 工具管理 CRUD 是新 API 领域，独立路由文件保持 control.py 简洁。
 
 ## Architectural Patterns
 
-### Pattern 1: Layered Harness (Control Plane Separation)
+### Pattern 1: 事件驱动的确认暂停 (复用已有 ConfirmationRequired 模式)
 
-**What:** Each layer of the harness wraps the layer below, adding constraints and capabilities without modifying the lower layer. The agent loop does not know about permissions; the permission middleware does not know about context management.
+**What:** Agent 循环在工具创建的敏感点暂停，通过 EventBus 发布确认请求到前端，等待用户响应后继续执行。这与 v1.0 已有的危险命令确认 (PermissionGuard → ConfirmationRequired → ConfirmationResponse) 完全相同的模式。
 
-**When to use:** Always. This is the defining architectural pattern for harness engineering. It enables independent evolution of each concern.
-
-**Trade-offs:**
-- More indirection than a flat loop (but indirection here is the point -- it creates safe boundaries)
-- Each layer adds latency (sub-millisecond per layer, negligible vs LLM call latency)
-- Requires disciplined interface design to avoid leaky abstractions
-
-**Example (permission middleware wrapping tool call):**
-```python
-class AgentLoop:
-    async def execute_tool(self, tool_call: ToolCall) -> ToolResult:
-        # Layer 3: Permission check (before execution)
-        await self.permission_middleware.check(tool_call)
-
-        # Layer 2: Sandbox execution
-        result = await self.sandbox.execute(tool_call)
-
-        # Layer 1: Context management appends result
-        await self.context_manager.append(result)
-
-        # Layer 0: Events emitted everywhere
-        self.events.emit(ToolExecuted(tool_call, result))
-        return result
-```
-
-### Pattern 2: State Machine Agent Loop
-
-**What:** Replace the raw while-loop with an explicit state machine. Each state (REASON, ACT, OBSERVE, FINISH, ERROR) has a clear entry condition, execution logic, and next-state transition. This gives precise control flow and trivial observability (just log state transitions).
-
-**When to use:** Any agent beyond the "hello world" ReAct demo. The raw while-loop collapses as soon as you need error recovery, human-in-the-loop, or observability hooks.
+**When to use:** DynamicToolCreator 的两阶段确认流程——代码语法检查完成后暂停等待用户审查、Agent 自测完成后暂停等待用户确认注册。
 
 **Trade-offs:**
-- More boilerplate than a while-loop
-- Easier to reason about and debug ("we failed in ACT state because...")
-- Natural integration point for async operations and streaming
+- 优点：复用已有 EventBus + asyncio.Event 暂停机制，后端无需新增状态机状态
+- 缺点：用户必须在前端响应，CLI 模式下需要 CLI 消费者支持确认交互（已有范例）
 
-**Example:**
+**Example (后端——DynamicToolCreator 内部确认暂停):**
 ```python
-class AgentState(Enum):
-    START = "start"
-    REASON = "reason"
-    ACT = "act"
-    OBSERVE = "observe"
-    FINISH = "finish"
-    ERROR = "error"
+# DynamicToolCreator._request_user_confirmation()
+async def _request_user_confirmation(
+    self, tool_name: str, code: str, persistence: str, working_dir: str
+) -> bool:
+    """发布确认事件并等待用户响应。"""
+    import uuid
+    confirmation_id = str(uuid.uuid4())[:8]
+    wait_event = asyncio.Event()
+    approved_value = False
 
-class StepContext:
-    step_id: str
-    state: AgentState
-    messages: list[Message]
-    pending_tool_calls: list[ToolCall]
-    budget_remaining: float
-    retry_count: int
+    # 存储等待状态
+    self._pending_confirmations[confirmation_id] = (wait_event, "approved")
 
-class ReActLoop:
-    async def step(self, ctx: StepContext) -> StepContext:
-        self.events.emit(StateChanged(ctx.state))
+    # 发布确认事件到 EventBus
+    await self._bus.publish("tool_creation_requested", {
+        "event_type": "tool_creation_requested",
+        "session_id": self._session_id,
+        "step_num": self._current_step,
+        "confirmation_id": confirmation_id,
+        "tool_name": tool_name,
+        "code": code,
+        "persistence": persistence,
+        "working_dir": working_dir,
+    })
 
-        if ctx.state == AgentState.REASON:
-            response = await self.provider.get_response(
-                self.context_manager.compact(ctx.messages),
-                self.tool_registry.schemas()
-            )
-            ctx.pending_tool_calls = response.tool_calls
-            ctx.messages.append(response.message)
-            ctx.budget_remaining -= response.usage.total_tokens
-
-            if response.is_final:
-                return ctx.transition(AgentState.FINISH)
-            elif ctx.pending_tool_calls:
-                return ctx.transition(AgentState.ACT)
-            else:
-                return ctx.transition(AgentState.OBSERVE)
-
-        elif ctx.state == AgentState.ACT:
-            for tc in ctx.pending_tool_calls:
-                result = await self.execute_tool(tc)
-                ctx.messages.append(result)
-            ctx.pending_tool_calls = []
-            return ctx.transition(AgentState.OBSERVE)
-
-        elif ctx.state == AgentState.OBSERVE:
-            if ctx.budget_remaining <= 0:
-                return ctx.transition(AgentState.ERROR)
-            return ctx.transition(AgentState.REASON)
-
-        # ... FINISH and ERROR handled similarly
-```
-
-### Pattern 3: Append-Only Message Store + Prefix-Stable Prompt
-
-**What:** The message history is a linear, append-only list. Nothing is ever mutated or deleted (even compaction produces new summary messages that are appended, not inserted into the old position). The system prompt is a fixed prefix that never changes between turns; dynamic context is appended as messages at the end of the list.
-
-**When to use:** Every agent. This pattern is the foundation for KV-cache reuse (>80% hit rate), clean audit trails, and reproducible session replay.
-
-**Trade-offs:**
-- Appending forever would exhaust context (handled by compaction which summarises old content into new messages, appended to the end)
-- Requires discipline to never mutate the system prompt (tempting but destroys KV-cache)
-- Compaction trades completeness for cost -- summarised history has information loss
-
-**Example:**
-```python
-class MessageStore:
-    def __init__(self, system_prompt: str):
-        self._messages: list[Message] = [Message(role="system", content=system_prompt)]
-
-    def append(self, message: Message):
-        self._messages.append(message)
-
-    def get_prefix_stable(self) -> list[Message]:
-        """System prompt must never change for KV-cache discipline."""
-        first = self._messages[0]
-        assert first.role == "system", "Must maintain prefix-stable system prompt"
-        return self._messages
-
-    def compact(self, strategy: CompactionStrategy) -> list[Message]:
-        """Summarize oldest messages, preserving tool call+result pairs in full."""
-        if self.token_count <= self.compaction_threshold:
-            return self._messages
-        return strategy.apply(self._messages)
-```
-
-### Pattern 4: Error Re-Injection (Deterministic Bridge Over Probabilistic Model)
-
-**What:** When a tool call fails, the error is returned as a structured tool result -- not as a Python exception that crashes the loop. The LLM sees the error in its context and can self-correct. Error messages follow a "what went wrong + how to fix it" format that guides the model toward recovery.
-
-**When to use:** All tool execution failures. This is the primary error recovery mechanism for LLM agents. Reserve exceptions for infrastructure failures (network down, provider 500).
-
-**Trade-offs:**
-- The LLM might not self-correct (requires loop detection as a fallback)
-- Error messages must be carefully crafted to guide without leaking system internals
-- Works well for parameter errors and tool execution failures; does not help with system-level errors (rate limits, provider failures)
-
-**Example:**
-```python
-async def sandbox_execute(tool_call: ToolCall, tool_def: ToolDef) -> ToolResult:
+    # 等待用户响应（带超时）
     try:
-        result = await asyncio.wait_for(
-            tool_def.func(**tool_call.args),
-            timeout=tool_def.timeout_seconds
-        )
-        return ToolResult.ok(result)
+        await asyncio.wait_for(wait_event.wait(), timeout=120.0)
+        approved_value = self._pending_confirmations[confirmation_id][1]
     except asyncio.TimeoutError:
-        return ToolResult.error(
-            message=f"Tool '{tool_call.name}' timed out after {tool_def.timeout_seconds}s",
-            guidance=f"Try a smaller input or a different approach"
-        )
-    except TypeError as e:
-        return ToolResult.error(
-            message=f"Invalid parameters: {e}",
-            guidance=f"Use the tool schema: {tool_def.schema}"
-        )
-    except Exception as e:
-        return ToolResult.error(
-            message=f"{tool_call.name} failed: {type(e).__name__}: {e}",
-            guidance="Try a different approach"
-        )
+        pass
+    finally:
+        self._pending_confirmations.pop(confirmation_id, None)
+
+    return approved_value
+```
+
+### Pattern 2: Agent-as-Tool 桥接的变体 -- Built-in-Tool 模式
+
+**What:** DynamicToolCreator 不是 AgentTool（不是启动子 Agent），而是一个内置工具（built-in tool），通过 `@tool` 装饰器注册到 ToolRegistry。LLM 调用它 → ToolExecutor 执行 → 返回结果。内部包含完整的确认暂停→注册流程。
+
+**When to use:** 当一个操作需要 LLM 作为触发者但实际执行不需要独立 Agent 循环时——内置工具模式比 Agent-as-Tool 更轻量。
+
+**与 AgentTool 模式的对比:**
+
+| 维度 | AgentTool (已有) | DynamicToolCreator (新增) |
+|------|------------------|---------------------------|
+| 触发方式 | LLM 调用 tool | LLM 调用 generate_tool |
+| 执行模式 | 启动独立 FSM 子循环 | 同步管道（语法检查→确认→沙箱测试→注册） |
+| 需要独立 EventBus | 是 | 否（使用主 EventBus） |
+| 需要独立 Session | 是 | 否 |
+| 确认暂停 | 子 Agent 内部（如需要） | 主 EventBus + await asyncio.Event |
+
+### Pattern 3: 管道式工具创建流程 (Pipeline Pattern)
+
+**What:** DynamicToolCreator 内部实现一个多阶段管道，每个阶段有明确的 gate（通过/不通过），不通过则中止并返回结构化错误给 LLM。
+
+**Pipeline stages:**
+```
+generate_tool(code, name, persistence, working_dir) → ToolResult
+  1. 语法检查 (ast.parse / bash -n)        → 不通过: 返回错误 + 语法问题描述
+  2. 危险模块扫描 (DangerousModuleScanner)   → 不通过: 返回错误 + 禁止的 import 列表
+  3. 用户确认 (EventBus + asyncio.Event)     → 不通过: 返回 "用户拒绝"
+  4. 沙箱自测 (SandboxExecutor)             → 不通过: 返回错误 + 自测失败详情
+  5. 持久化 (ToolPersistenceManager)         → 总是成功
+  6. 注册到 ToolRegistry                    → 总是成功
+```
+
+**When to use:** 任何需要多阶段验证的操作，特别是涉及安全和用户确认的流程。
+
+### Pattern 4: 策略模式的沙箱隔离 (Sandbox Strategy)
+
+**What:** SandboxExecutor 支持多种隔离策略（子进程 + 文件系统限制 vs. AST 重写 vs. Docker），通过策略接口切换。v1.1 使用子进程 + 文件系统限制（最简单可靠）。
+
+**Why not Docker:** 遵循 CLAUDE.md 决策——"Learn first, containerize later." 子进程隔离足够满足 v1.1 学习需求。
+
+**Example:**
+```python
+class SandboxExecutor:
+    def __init__(self, strategy: SandboxStrategy = SubprocessSandboxStrategy()):
+        self._strategy = strategy
+
+    async def execute(self, code: str, working_dir: str, timeout: float) -> ToolResult:
+        return await self._strategy.run(code, working_dir, timeout)
+
+class SubprocessSandboxStrategy:
+    async def run(self, code: str, working_dir: str, timeout: float) -> ToolResult:
+        # subprocess.run 在隔离子目录中执行
+        # 写入临时 .py 文件 → subprocess 执行 → 捕获输出
+        ...
 ```
 
 ## Data Flow
 
-### Request Flow (Single Turn)
+### 完整的动态工具创建流程
 
 ```
-User Input
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ REASON                                                            │
-│                                                                   │
-│  1. Context Manager: check token count, compact if > threshold    │
-│  2. Agent Loop: call Provider Adapter with messages + tools       │
-│  3. Provider Adapter: normalize to provider format, send to LLM   │
-│  4. Response parsed into tool_calls[] or final_answer             │
-│  5. Messages appended to MessageStore                             │
-│  6. Event emitted: ThoughtGenerated(response)                     │
-│  7. SSE stream: push to web frontend                              │
-└──────────────────────────────────────────────────────────────────┘
-    │
-    ▼ (if tool_calls present)
-┌─────────────────────────────────────────────────────────────────┐
-│ ACT                                                               │
-│                                                                   │
-│  For each tool_call in parallel or sequentially:                  │
-│    1. Permission Middleware: check tier (safe/moderate/dangerous) │
-│       a. safe → proceed                                           │
-│       b. moderate → check whitelist → proceed or deny             │
-│       c. dangerous → emit approval request, PAUSE loop            │
-│    2. Sandbox Executor: run with timeout + size limit             │
-│    3. On success: return ToolResult                               │
-│    4. On failure: Error Re-injector returns structured error      │
-│    5. Event emitted: ToolCalled(tool_call_id, status, duration)   │
-│    6. SSE stream: update tool call badge (running → done/error)   │
-│    7. Result appended to MessageStore                             │
-└──────────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ OBSERVE                                                           │
-│                                                                   │
-│  1. Check budget (tokens, iterations, cost)                       │
-│     a. Budget exhausted → transition to ERROR / FINISH            │
-│     b. Can continue → transition back to REASON                   │
-│  2. Looping detection: check for repeated patterns                │
-│     a. Detected → inject "change approach" guidance               │
-│  3. Checkpoint: serialize full state to disk                      │
-│  4. Event emitted: TurnCompleted(summary, latency)                │
-│  5. JSONL: append one log line                                    │
-└──────────────────────────────────────────────────────────────────┘
-    │
-    ▼ (loop back to REASON or proceed to FINISH)
-┌─────────────────────────────────────────────────────────────────┐
-│ FINISH                                                            │
-│                                                                   │
-│  1. Final output guardrails (PII scan, schema validation)         │
-│  2. Return final answer to user                                   │
-│  3. Event emitted: SessionComplete(summary)                       │
-│  4. SSE stream: final state to frontend                           │
-│  5. Checkpoint: final state serialized (for replay)               │
-└─────────────────────────────────────────────────────────────────┘
+Agent LLM 决定创建工具
+        │
+        ▼
+LLM 调用 generate_tool(name="disk.check_inodes", code="...", persistence="sandbox")
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ DynamicToolCreator.execute()                                        │
+│                                                                     │
+│  [阶段 1: 语法检查]                                                  │
+│    ast.parse(code) 或 bash -n                                      │
+│    └─ 失败 → 返回 ToolResult.error("语法错误: line 3...")           │
+│    └─ 成功 → 继续                                                   │
+│                                                                     │
+│  [阶段 2: 危险模块扫描]                                              │
+│    DangerousModuleScanner.scan(code)                                │
+│    └─ 检测到危险模块 → 返回 ToolResult.error("禁止 import os.system") │
+│    └─ 安全 → 继续                                                   │
+│                                                                     │
+│  [阶段 3: 用户确认 - EventBus 暂停]                                   │
+│    await bus.publish("tool_creation_requested", {...})  ─────────┐  │
+│    await asyncio.wait_for(event.wait(), timeout=120)             │  │
+│    └─ 用户拒绝或超时 → 返回 ToolResult.error("用户拒绝")          │  │
+│    └─ 用户确认 → 继续                                            │  │
+│                                                                  │  │
+│  [阶段 4: 沙箱自测]                                              │  │
+│    SandboxExecutor.execute(code + test_code)                     │  │
+│    └─ 自测失败 → 返回 ToolResult.error("自测失败: ...")          │  │
+│    └─ 成功 → 继续                                                │  │
+│                                                                  │  │
+│  [阶段 5: 持久化]                                                │  │
+│    ToolPersistenceManager.save(code, name, persistence_level)    │  │
+│                                                                  │  │
+│  [阶段 6: 注册]                                                  │  │
+│    registry.register_meta(meta)  使用已有的 register_meta 接口   │  │
+│                                                                  │  │
+│  返回 ToolResult.success(data="工具 'disk.check_inodes' 已创建")  │  │
+└─────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 前端数据流 (阶段 3 确认 - 通过 SSE)                                   │
+│                                                                     │
+│ SSE event: tool_creation_requested ─────────────────────────────┐   │
+│    │                                                             │   │
+│    ▼                                                             │   │
+│ eventStore.appendEvent() → 存储事件                               │   │
+│    │                                                             │   │
+│    ▼                                                             │   │
+│ uiStore.setPendingToolCreation(event) → 触发 UI 状态              │   │
+│    │                                                             │   │
+│    ▼                                                             │   │
+│ ToolCreationDialog 渲染:                                          │   │
+│   - 代码语法高亮展示 (复用 ToolDetail 的 JsonHighlight 模式)      │   │
+│   - 持久化级别选择 (会话/沙箱/项目)                                │   │
+│   - 工作目录配置                                                  │   │
+│   - 批准 / 拒绝 / 修改并批准 按钮                                 │   │
+│    │                                                             │   │
+│    ▼ (用户点击批准)                                               │   │
+│ POST /api/sessions/{id}/confirm-tool-creation                     │   │
+│   → control.confirm_tool_creation()                               │   │
+│   → DynamicToolCreator.respond(confirmation_id, approved=True)    │   │
+│   → asyncio.Event.set() → wait() 解除阻塞                         │   │
+│   → 管道继续到阶段 4                                              │   │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Event Flow (Observability)
+### 工具更新流程 (Merge/Overwrite)
 
 ```
-Every component emits structured events via a central EventBus:
-
-EventBus (asyncio.Queue)
-    │
-    ├─▶ JSONL Logger (disk) — all events, structured, archival
-    │     append to session-{id}.jsonl
-    │
-    ├─▶ SSE/WebSocket Stream (web frontend) — real-time events only
-    │     filters: state_changed, tool_call, tool_result, error, thought
-    │     format: { type, timestamp, data }
-    │
-    └─▶ Metrics Collector (in-memory)
-          aggregates: latency p50/p95/p99, error rate, token usage
-          periodic flush to log or dashboard
+Agent LLM 调用 generate_tool(name="disk.check_inodes", code="新代码...")
+        │
+        ▼
+DynamicToolCreator 检测到 tool_name 已存在于 registry
+        │
+        ▼
+发布 tool_update_requested 事件 (包含 diff: 旧代码 vs 新代码)
+        │
+        ▼
+前端 ToolCreationDialog 以 "更新模式" 渲染:
+  - 并排 diff 展示 (old ↔ new)
+  - 选项: 覆盖 / 拒绝 / 保存为新名称
+        │
+        ▼
+覆盖: registry.unregister(old) → register_meta(new)
+新名称: 自动追加后缀 (如 disk.check_inodes_v2)
+拒绝: 返回 ToolResult.error("更新被拒绝")
 ```
 
-### Key Data Flow Rules
-
-1. **Messages flow down and up**: Agent Loop passes messages down (to Provider Adapter → LLM) and receives results up. All messages are append-only in the MessageStore.
-
-2. **Tool calls are intercepted, not executed by the loop**: The loop delegates to Permission Middleware → Sandbox Executor. Results (or errors) flow back as structured ToolResult objects.
-
-3. **Events flow outward only**: Components emit events but never consume them from other layers. The EventBus is a unidirectional dispatch point. This prevents circular dependencies and keeps layers decoupled.
-
-4. **State flows through checkpoints**: The Checkpoint Manager reads full state at the end of each OBSERVE state and writes serialized snapshots. On crash recovery, it reads the latest checkpoint to bootstrap the MessageStore.
-
-5. **Web frontend is a read-only observer**: It receives events but never sends commands back to the loop (except approval gate responses, which are a controlled exception via a dedicated API endpoint).
-
-## Build Order (Phase Dependencies)
-
-The build order follows both dependency constraints and the project's stated "depth directions" (Resilience → Context Engineering → Observability → Memory) while mapping to practical implementation phases:
+### 工具发现流程
 
 ```
-Phase 1: Core Agent Loop
-  │
-  ▼
-Phase 2: Tool Abstraction Layer    ─── (needs loop to call tools)
-  │
-  ▼
-Phase 3: Context Management         ─── (needs working loop + tools to have context worth managing)
-  │
-  ▼
-Phase 4: Error Recovery             ─── (needs context for state persistence)
-  │
-  ▼
-Phase 5: Observability + Frontend   ─── (needs everything to have events worth observing)
-  │
-  ▼
-Phase 6: Memory                     ─── (needs observability to understand memory requirements)
+Session 启动时:
+  create_agent_components()
+    → 扫描 .sandbox/tools/*.py + src/loopai/tools/dynamic/*.py
+    → ToolPersistenceManager.load_all()
+    → registry.register_meta() 逐个注册
+
+System prompt 注入:
+  build_system_prompt() 在已有工具描述后追加:
+    "## 可用的动态工具"
+    "以下工具由 Agent 动态创建，可以在运行时调用:"
+    "- disk.check_inodes: 检查 inode 使用情况 (沙箱级, 1 天前创建)"
+    "- ..."
+
+Agent 运行时发现:
+  LLM 调用 list_dynamic_tools 内置工具 → 返回所有动态工具的详细信息
 ```
 
-### Phase 1: Core Agent Loop
-**What:** Minimal ReAct loop with Provider Adapter. Hardcoded system prompt, no tools, just a single mocked tool to prove the loop works.
-**Deliverable:** `agent/loop.py`, `agent/state.py`, `agent/adapters/*.py` — a working state machine that calls an LLM and processes tool call responses.
-**Does NOT include:** Sandboxing, permissions, context management, error recovery, observability (beyond print debugging).
-**Dependency for:** Everything else.
+## Integration Points -- 精确对接点
 
-### Phase 2: Tool Abstraction Layer
-**What:** Tool registry, sandbox execution, permission tiers (safe/moderate/dangerous with HITL gates for dangerous ops). First real tools: shell execution, filesystem operations, disk diagnostics.
-**Deliverable:** `tools/registry.py`, `tools/sandbox.py`, `tools/permissions.py`, `tools/builtin/*.py`.
-**Depends on:** Phase 1 (the loop needs to exist to call tools).
-**Dependency for:** Phase 3 (context only matters when tools produce real results).
+### 1. DynamicToolCreator ↔ ToolRegistry
 
-### Phase 3: Context Management
-**What:** Token counting, compaction (sliding window then summarization), overflow file store. Append-only message store with prefix-stable system prompt.
-**Deliverable:** `context/*.py`.
-**Depends on:** Phase 2 (needs real tool output sizes and patterns to calibrate compaction thresholds).
-**Dependency for:** Phase 4 (checkpointing needs context state).
+**对接方式:** `registry.register_meta(meta)` -- 使用已有的 `register_meta` 接口，无需修改 ToolRegistry。
 
-### Phase 4: Error Recovery + Resilience
-**What:** Checkpoint manager (state serialization + crash recovery), loop detector (infinite loop detection), retry chain with exponential backoff, guardrails (input/output scanning).
-**Deliverable:** `resilience/*.py`.
-**Depends on:** Phase 3 (checkpointing serializes context state; loop detection needs message history).
-**Dependency for:** Phase 5 (observability is most valuable when there are errors to observe).
+**关键点:** DynamicToolCreator 构造 ToolMetadata 时需要设置:
+- `name`: 用户指定的工具名
+- `description`: LLM 提供的描述
+- `permission_level`: 始终为 SAFE（沙箱内执行）
+- `timeout`: 用户可配置，默认 30s
+- `func_ref`: 包装函数——调用 SandboxExecutor.execute() 的 async 函数
+- `param_schema`: LLM 提供的 JSON Schema
+- `tags`: 自动添加 `["dynamic", f"persistence:{level}"]`
 
-### Phase 5: Observability + Web Frontend
-**What:** Event bus + emitters in all layers, JSONL structured logging, SSE streaming endpoint, React web frontend with timeline/tool call cards/approval gates.
-**Deliverable:** `observability/*.py`, `web/` (frontend).
-**Depends on:** Phases 1-4 (all layers must emit events).
-**Note:** Basic JSONL logging can (and should) be added as early as Phase 1, even if the full observability layer is built here. The recommendation is "JSONL logging from turn 1" — but the structured event bus and web frontend come at this phase.
+### 2. DynamicToolCreator ↔ EventBus
 
-### Phase 6: Memory (Cross-Session)
-**What:** Session persistence beyond a single conversation, intermediate (Redis-backed) and long-term (RAG-backed) memory patterns.
-**Depends on:** Phase 5 (observability informs what memory patterns are needed; frontend can visualize memory state).
-**Note:** Explicitly deferred per PROJECT.md — not in scope for v1.
+**对接方式:** 使用已有 `EventBus.publish(event_type, event_data)` 方法。
 
-### Phase Ordering Rationale
+**新增事件类型:**
 
-The ordering follows a strict "build bottom-up" dependency chain. Each phase depends on the previous one being stable:
+| 事件类型 | 触发时机 | 携带数据 |
+|---------|---------|---------|
+| `tool_creation_requested` | 语法检查通过后，等待用户确认 | confirmation_id, tool_name, code, persistence, working_dir |
+| `tool_creation_confirmed` | 用户确认后 | confirmation_id, tool_name, approved, modified_code(可选) |
+| `tool_created` | 工具成功注册后 | tool_name, persistence, timestamp |
+| `tool_creation_failed` | 创建流程任何阶段失败 | tool_name, stage, error_message |
+| `tool_update_requested` | 检测到名称冲突时 | confirmation_id, tool_name, old_code, new_code, diff |
+| `tool_update_confirmed` | 用户确认更新后 | confirmation_id, tool_name, action(overwrite/rename/reject) |
 
-- **Phase 1 must go first** because the loop is the entry point for everything. No loop, no agent.
-- **Phase 2 before Phase 3** because compaction thresholds and overflow patterns depend on knowing what real tool outputs look like. Compaction designed in a vacuum (no real tools) would produce wrong thresholds.
-- **Phase 3 before Phase 4** because checkpointing needs a well-defined context state to serialize. Loop detection needs the message history that context management provides.
-- **Phase 4 before Phase 5** because the most important things to observe are error states and recovery events. Building observability first (before error handling exists) would miss the most interesting events.
-- **Phase 5 before Phase 6** because memory patterns need observability data to understand what's worth remembering and what the model actually uses.
+### 3. DynamicToolCreator ↔ API Routes
 
-## Scaling Considerations
+**对接方式:** 复用已有 `control.py` 中确认端点的模式——通过 `app.state.active_sessions[session_id]["dynamic_creator"]` 获取实例。
 
-This project is explicitly a learning/exploration project (not production-deployed at scale). However, the architecture is designed to scale to production needs without rewrites:
+**新增端点:**
+```python
+# 复用已有 active_sessions 字典存储 DynamicToolCreator 引用
+POST /api/sessions/{session_id}/confirm-tool-creation
+  body: { confirmation_id, approved, modified_code? }
+  → 查找 dynamic_creator → 调用 respond(confirmation_id, approved, modified_code)
+
+POST /api/sessions/{session_id}/confirm-tool-update
+  body: { confirmation_id, action: "overwrite"|"rename"|"reject", new_name? }
+  → 查找 dynamic_creator → 调用 respond_update(confirmation_id, action, new_name)
+
+# 新增独立路由文件
+GET    /api/tools/dynamic                    → 列出所有动态工具及状态
+PUT    /api/tools/dynamic/{name}/toggle      → 启用/禁用工具
+DELETE /api/tools/dynamic/{name}             → 删除工具（及其持久化文件）
+```
+
+### 4. DynamicToolCreator ↔ ReActFSM
+
+**对接方式:** ReActFSM 不需要感知 DynamicToolCreator 的存在。generate_tool 是注册到 ToolRegistry 的普通工具——LLM 调用它时，`_handle_act` 中已有的工具管道 (LoopDetector → Registry lookup → PermissionGuard → ToolExecutor.execute) 完全适用。
+
+**无需修改 `_handle_act` 的原因:**
+- generate_tool 是 `@tool` 装饰的普通工具，tool_type 为 SAFE
+- PermissionGuard 检查动态工具创建？不需要——这不是危险 Bash 命令，是代码生成
+- ToolExecutor 正常执行 generate_tool，内部流程自行处理确认暂停
+
+**唯一潜在修改点:** 如果工具创建确认超时需要 FSM 感知（当前 120s 超时在 DynamicToolCreator 内部处理）
+
+### 5. DynamicToolCreator ↔ create_agent_components
+
+**对接方式:** 在 `create_agent_components()` 中实例化 DynamicToolCreator 并注册 generate_tool。
+
+```python
+# 在 create_agent_components() 中添加:
+dynamic_creator = DynamicToolCreator(
+    registry=registry,
+    bus=bus,
+    sandbox=SandboxExecutor(),
+    persistence=ToolPersistenceManager(),
+)
+registry.register(dynamic_creator.generate_tool)
+registry.register(dynamic_creator.list_dynamic_tools)
+
+return {
+    ...existing keys...,
+    "dynamic_creator": dynamic_creator,  # 供 API 确认端点使用
+}
+```
+
+### 6. 前端 ↔ 后端 (SSE + REST)
+
+**SSE 事件流:**
+```
+tool_creation_requested → ToolCreationDialog 弹出
+tool_created → ToolManager Tab 刷新 + Timeline 显示成功
+tool_creation_failed → Timeline 显示失败详情
+```
+
+**REST API 调用:**
+```
+confirmToolCreation(sessionId, confirmationId, approved, modifiedCode?)
+fetchDynamicTools() → list of dynamic tools for ToolManager
+toggleDynamicTool(name, enabled) → enable/disable
+deleteDynamicTool(name) → delete
+```
+
+## Scalability Considerations
 
 | Scale | Architecture Adjustments |
 |-------|--------------------------|
-| Prototype (1 user, local) | All components in-process. SQLite for checkpoints. stdout for logging. |
-| Team (5-50 users) | JSONL logs to shared filesystem. Redis for session state. Basic web dashboard. |
-| Production (100+ concurrent sessions) | Separate observability collector service. S3 for checkpoints. OpenTelemetry + Langfuse/Arize for tracing. Load-balanced agent runners. |
+| 1-10 动态工具/会话 | 会话级内存 dict -- 简单直接 |
+| 10-100 动态工具/会话 | 沙箱级文件存储 + 启动时预加载 -- 当前设计已支持 |
+| 100+ 动态工具总计 | 项目级持久化文件扫描可能变慢 → 添加文件系统缓存 (mtime-based) |
+| 多用户并发 | 每个会话独立 SandboxExecutor 子目录 → 自然隔离 |
 
 ### Scaling Priorities
 
-1. **First bottleneck: Context window exhaustion in long sessions.** If sessions exceed ~50 turns, compaction frequency becomes critical. Solution: tune compaction threshold, add summarization strategy, implement file-based overflow. All handled in Phase 3 architecture.
-
-2. **Second bottleneck: Observability data volume.** JSONL per-session logging is fine for demos but becomes unwieldy at scale. Solution: structured collector service (Phase 5) that aggregates and samples events before storage.
+1. **First bottleneck:** 项目级 `dynamic/` 目录文件数量增长 → 启动扫描时间线性增长。解决: mtime 缓存 + 增量加载。
+2. **Second bottleneck:** 单个工具代码过大 (>10KB) → 确认事件数据过大拖慢 SSE。解决: 事件中只传代码哈希 + 摘要，前端通过 REST 获取完整代码。
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: The God Loop
+### Anti-Pattern 1: 动态工具直接调用 os.system/subprocess
 
-**What people do:** One monolithic while-loop that handles tool calls, error recovery, context formatting, and logging in 200+ lines of inline code. This is the default output of most ReAct tutorials.
+**What people do:** LLM 生成的工具代码中包含 `os.system("rm -rf /")` 等危险操作。
+**Why it's wrong:** 动态工具执行在没有沙箱隔离时等价于给 LLM shell 访问权限。
+**Do this instead:** SandboxExecutor 在隔离子目录中执行 + DangerousModuleScanner 扫描 AST 阻止危险模块。
 
-**Why it's wrong:** Impossible to test individual concerns (need to mock the whole loop). Any change risks breaking everything. Adding error recovery requires untangling the flow. Adding observability means adding print() calls that become tech debt.
+### Anti-Pattern 2: 跳过用户确认直接注册
 
-**Do this instead:** State machine decomposition (Pattern 2). Each concern is one state or one middleware layer. Test each state in isolation. Compose them in the loop.
+**What people do:** Agent 生成代码 → 自动注册为工具 → 立即执行，无人工审查。
+**Why it's wrong:** LLM 可能生成有 bug、安全漏洞或不符合预期的代码。用户确认是唯一的安全边界。
+**Do this instead:** 必须经过用户确认（阶段 3）才能进入沙箱自测和注册（阶段 4-6）。不能跳过。
 
-### Anti-Pattern 2: Silent Context Loss
+### Anti-Pattern 3: 动态工具与静态工具混用同一命名空间
 
-**What people do:** Relying on LLM context window to hold everything, without monitoring token counts. When the window fills, the oldest messages silently drop off. The agent loses its task context and produces nonsensical results, but no one knows why.
+**What people do:** LLM 创建名为 `bash.df` 的工具覆盖已有的静态工具。
+**Why it's wrong:** 覆盖静态工具可能导致 Agent 行为不可预测。
+**Do this instead:** 动态工具使用 `dynamic.` 命名空间前缀（如 `dynamic.disk_check_inodes`）；注册前检查冲突，已有同名静态工具时拒绝覆盖并提示 Agent 换名。
 
-**Why it's wrong:** Silent data loss with no observable signal. The model keeps producing output, so there is no error to investigate. Debugging requires manually counting tokens across the session.
+### Anti-Pattern 4: 持久化到项目级但无代码审查
 
-**Do this instead:** Explicit token tracking with configurable compaction threshold (85-92%). Log compaction events. Never let the model see a truncated context without knowing about it. File-based overflow for large outputs.
+**What people do:** 用户轻易批准项目级持久化，恶意或低质量代码进入项目源码树。
+**Why it's wrong:** 项目级持久化的工具会在每次启动时自动加载——buggy 或恶意代码成为持久威胁。
+**Do this instead:** 项目级持久化默认禁用；需要用户在配置中显式启用 `allow_project_persistence: true`；前端在项目级选项旁显示警告。
 
-### Anti-Pattern 3: Bolted-On Observability
+### Anti-Pattern 5: 用 AgentTool 模式实现 generate_tool
 
-**What people do:** Building the agent first, adding "real logging" later. When production issues arise, there is no baseline data to compare against. The logging infrastructure added later inevitably misses critical events that weren't anticipated.
+**What people do:** 把 generate_tool 实现为子 Agent（类似 `disk_analyzer` 的 Agent-as-Tool 模式）。
+**Why it's wrong:** 工具创建是一系列确定性步骤（语法检查→确认→注册），不需要独立的 ReAct 循环。启动子 Agent 增加延迟和复杂度。
+**Do this instead:** 使用内置工具模式（Built-in-Tool）——`@tool` 装饰的 async 函数，内部管道式执行。
 
-**Why it's wrong:** You cannot retroactively capture events you didn't anticipate. Building observability first (even simple JSONL logging from turn 1) gives you baseline data and shapes the event taxonomy before the agent is complex enough to hide its behavior.
+## 与已有组件的修改清单
 
-**Do this instead:** Add JSONL logging in Phase 1. Even if it's just "turn N: REASON state, sent N tokens, got 2 tool calls." The schema will evolve, but the habit and infrastructure are there from day one.
-
-### Anti-Pattern 4: Over-Tooling
-
-**What people do:** Adding 20+ tools to the agent because "the model might need them." The model makes worse decisions with a longer tool list. Erroneous tool selection increases.
-
-**Why it's wrong:** Multiple studies (Vercel, Stripe, Atlan) converge on the same finding: performance degrades with more than ~10 visible tools. The model spends attention budget parsing irrelevant options.
-
-**Do this instead:** Start with 4-5 atomic tools. Use progressive disclosure (register tools but only load relevant ones per task). Apply the Stripe pattern: one agent, one bounded task. If a task needs >5 tools, it's probably two tasks.
-
-## Integration Points
-
-### External Services
-
-| Service | Integration Pattern | Notes |
-|---------|---------------------|-------|
-| **OpenAI-compatible API** | Provider Adapter → HTTP POST with JSON body. Handles streaming (SSE) and non-streaming. | Provider selection via config, not import. Adapter pattern enables switching without touching loop. |
-| **Web frontend (browser)** | SSE stream from `observability/stream.py`. REST endpoints for HITL approval gates. | Read-only observer model. Approval gates are the only control input from frontend. |
-
-### Internal Boundaries
-
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| Agent Loop ↔ Provider Adapter | `ProviderAdapter.get_response(messages, tools) → Response` | Clean interface contract. Adapter owns provider SDK imports. |
-| Agent Loop ↔ Tool Registry | `ToolRegistry.resolve(name) → ToolDef` | Tool schema flows into messages; tool function flows into sandbox. |
-| Agent Loop ↔ Permission Middleware | `PermissionMiddleware.check(tool_call) → Approval | Deny | PendingHITL` | Three return states: auto-approve, deny, or pause-for-approval. |
-| Agent Loop ↔ Context Manager | `ContextManager.get_context(messages) → List[Message]` | Compaction is transparent to the loop. Loop passes full history, gets back compacted version. |
-| All Layers ↔ Event Bus | `EventBus.emit(event: AgentEvent)` | Unidirectional. Components never consume events; they only emit. |
-| Event Bus ↔ SSE Stream | `StreamWriter.write(event) → None` | Filter for real-time-relevant events only (state transitions, tool status updates, errors). |
-| Event Bus ↔ JSONL Logger | `Logger.write(event) → None` | Archives all events. Used for replay, debugging, metrics. |
-| SSE Stream ↔ Web Frontend | `EventSource` (browser) consuming SSE stream | Standard HTTP SSE. No custom protocol. Frontend uses declarative React hooks. |
-| Web Frontend ↔ HITL Approval API | `POST /approve {session_id, tool_call_id, approved: bool}` | Separate REST endpoint from the event stream. Idempotent. |
+| 组件 | 修改级别 | 具体修改 |
+|------|---------|---------|
+| `events/schemas.py` | 轻量 | 添加 6 个新事件 Pydantic 模型 + 更新 Event 联合类型 |
+| `tools/types.py` | 轻量 | ToolMetadata 添加 `tool_type: Literal["static", "dynamic"]` 字段 |
+| `tools/registry.py` | 无需修改 | `register_meta()` 已支持动态注册 |
+| `tools/executor.py` | 轻量 | `_execute_once` 中检测 `tool_type == "dynamic"` → 路由到 SandboxExecutor |
+| `state_machine/fsm.py` | 无需修改 | generate_tool 通过已有工具管道执行 |
+| `api/routes/control.py` | 轻量 | 添加 2 个确认端点 |
+| `api/routes/tools.py` | 新增 | 工具管理 CRUD |
+| `api/schemas.py` | 轻量 | 添加 ConfirmToolCreationRequest, ToolSummary 等模型 |
+| `main.py` | 轻量 | create_agent_components 注册 generate_tool |
+| 前端 `eventTypes.ts` | 轻量 | 添加 6 个新事件接口 + 更新 Event 联合类型 |
+| 前端 `uiStore.ts` | 中等 | 添加 pendingToolCreation, toolCreationTab, dynamicTools |
+| 前端 `eventStore.ts` | 轻量 | 扩展 updateToolCalls 处理新事件类型 |
+| 前端 `api.ts` | 轻量 | 添加 confirmToolCreation, fetchDynamicTools 等 API 函数 |
 
 ## Sources
 
-- **Atlan, "How to Build an AI Agent Harness: A 2026 Complete Guide"** — 10-step harness build process with permission tiers, context compaction at 85-92%, JSONL logging from turn 1, LLM-as-judge verification, and the finding that harness quality (not model quality) determines agent reliability (13.7 benchmark point gain from harness improvements alone). https://atlan.com/know/how-to-build-ai-agent-harness/
-- **OpenAI Agents SDK (v0.14+, April 2026)** — Harness/Compute separation architecture, 7-layer model (Runner → AgentRunner → Agent → SandboxAgent → RunState → Session → Model), 5-category tool types. https://openai.com/zh-Hans-CN/index/the-next-evolution-of-the-agents-sdk/
-- **DeepWiki: openai/openai-agents-python** — Architecture overview covering the AgentRunner turn loop, sandbox persistence, and manifest abstraction. https://deepwiki.com/openai/openai-agents-python/1-overview
-- **LangGraph architecture (Baidu Developer deep-dives)** — State-graph model (State ↔ Node ↔ Edge), three-node ReAct as state machine, checkpoint-based pause/resume, streaming with intermediate state yields, topo-sort scheduling with cycle detection. https://developer.baidu.com/article/detail.html?id=6990984
-- **harness-engineering Python toolkit (dr-gareth-roberts)** — Open-source reference implementation with Pydantic-backed Tool + async Dispatcher, last-N compaction, summarization-based compaction, typed lifecycle hooks, PathScope sandbox, ReplayRunner, and PrivacyBoundary. https://github.com/dr-gareth-roberts/harness-engineering
-- **dataact (PyPI)** — Minimal production reference harness with handle/snapshot pattern, prefix-stable system prompt, progressive connector disclosure, JSONL turn logging, and explicit adapter boundary. https://pypi.org/project/dataact/
-- **Microsoft Agent Framework (March 2026)** — Built-in compaction system with composable strategies (ToolResultCompactionStrategy, SlidingWindowCompactionStrategy, TruncationCompactionStrategy). https://devblogs.microsoft.com/agent-framework/agent-harness-in-agent-framework/
-- **arXiv 2509.25370: Agent Error Taxonomy** — 5-domain failure classification (Memory, Reflection, Planning, Action, System) with domain-aware recovery. 24% task completion improvement. https://github.com/bug-ops/zeph/issues/2253
-- **agenttrace-ui (Vercel Community)** — React component library for reasoning traces, timeline/graph/compact views, approval gates, built on AI SDK v6. https://community.vercel.com/t/agenttrace-ui-human-in-the-loop-approval-gates-and-reasoning-traces-built-on-ai-sdk-v6/37962
-- **Blueprint for Modern Agentic Harness (2026, GitHub Gist)** — Four-tier context management policy (structured outputs → immediate eviction → deferred eviction → compaction → fresh-window restart), cache-first design. https://gist.github.com/amazingvince/52158d00fb8b3ba1b8476bc62bb562e3
-- **App.build: Six Principles for Production AI Agents** — Tool minimalism (<10 tools), one agent per bounded task, failure cheap via checkpointing, infrastructure as context. https://www.zenml.io/llmops-database/six-principles-for-building-production-ai-agents
-- **Steve Kinney: Designing an AI Gateway** — Gateway as provider abstraction layer, routing strategies (static/weighted/content-based/cost-based), retry chains with fallback. https://stevekinney.com/writing/ai-gateway-durable-workflows
-- **AG2 Agent Harness** — Configurable compaction triggers, periodic memory aggregation, bootstrap for initial knowledge seeding. https://docs.ag2.ai/latest/docs/beta/agent_harness/
+- 现有代码库: `src/loopai/events/schemas.py` (13 个事件模型 + Event 联合类型), `src/loopai/tools/registry.py` (register_meta 接口), `src/loopai/tools/executor.py` (4 层恢复管道), `src/loopai/state_machine/fsm.py` (_handle_act 工具管道), `src/loopai/agents/tool.py` (AgentTool 桥接模式), `src/loopai/api/routes/control.py` (确认端点模式), `src/loopai/main.py` (create_agent_components 工厂) -- HIGH confidence
+- isA Agent SDK Dynamic Tool Creation Proposal: https://github.com/xenoISA/isA_Agent_SDK/issues/378 -- MEDIUM confidence (sandbox 模块白名单设计参考)
+- Anvil SDK JIT Code Generation: https://pypi.org/project/anvil-agent/ -- MEDIUM confidence (JIT 工具生成管道设计参考)
+- Tool Forge: https://github.com/nextmoca/tool-forge -- MEDIUM confidence (沙箱验证管道参考)
+- Microsoft Agent Framework Hyperlight/CodeAct: https://github.com/microsoft/agent-framework/discussions/5328 -- MEDIUM confidence (沙箱执行模式参考)
 
 ---
-*Architecture research for: loopAI — ReAct Agent Harness*
-*Researched: 2026-05-27*
+*Architecture research for: Agent 动态工具创建系统*
+*Researched: 2026-05-31*
