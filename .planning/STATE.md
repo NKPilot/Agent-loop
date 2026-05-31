@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 动态工具系统
 status: planning
-last_updated: "2026-05-31T02:04:52.975Z"
+last_updated: "2026-05-31T02:30:00.000Z"
 last_activity: 2026-05-31
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,42 +17,41 @@ progress:
 
 ## 项目参考
 
-参见: .planning/PROJECT.md (更新于 2026-05-27)
+参见: .planning/PROJECT.md (更新于 2026-05-31)
 
 **核心价值:** 让 AI Agent 不仅"能跑"，而且可靠、可观测、可扩展——从 harness 设计的深度思考出发，构建值得信任的 agent 系统
-**当前焦点:** 阶段 5 - 可观测性与 Web 前端
+**当前焦点:** v1.1 动态工具系统——Agent 能在沙箱内自主编写 Python/Bash 代码，经用户确认后动态注册为新工具
 
 ## 当前位置
 
-阶段: 5 / 5 (可观测性与 Web 前端)
-计划: 6 / 7 (05-01 ~ 05-06 已完成)
-状态: 进行中
-最近活动: 2026-05-30 — 05-06 Tool Detail + Token/Cost + Confirmation 完成
+阶段: 路线图规划中
+计划: —
+状态: 需求已定义，等待 Phase 8 规划
+最近活动: 2026-05-31 — v1.1 路线图创建
 
-进度: [███████████████████░] 85%
+进度: [░░░░░░░░░░░░░░░░░░░░] 0%
 
 ## 性能指标
 
 **速度:**
 
-- 已完成计划数: 12
-- 平均耗时: — 
+- 已完成计划数: 0
+- 平均耗时: —
 - 总执行时间: —
 
 **分阶段统计:**
 
 | 阶段 | 计划数 | 总耗时 | 平均/计划 |
 |------|--------|--------|-----------|
-| 1. Agent 核心循环 | 5 | — | — |
-| 2. 工具系统 | 4 | — | — |
-| 3. 上下文管理 | 3 (已完成) | 37min | 12min |
-| 4. 韧性与恢复 | 3 | — | — |
-| 5. 可观测性与 Web 前端 | 6 (进行中) | — | — |
+| 8. 动态工具创建核心 (MVP) | 0 | — | — |
+| 9. 安全加固与沙箱隔离 | 0 | — | — |
+| 10. 用户体验与工具管理 | 0 | — | — |
+| 11. 集成验证与优化 | 0 | — | — |
 
 **近期趋势:**
 
-- 最近执行: 05-06-ToolDetail + TokenUsageCard + ConfirmationDialog (~45min)
-- 趋势: Phase 5 接近完成（6/7 plans），下一个为 05-07 端到端集成
+- v1.0 阶段 1-6 全部完成，阶段 7（Chat 模式）进行中
+- v1.1 路线图已创建，26 条需求覆盖 4 个阶段
 
 *每次计划完成后更新*
 
@@ -60,24 +59,15 @@ progress:
 
 ### 决策
 
-决策记录在 PROJECT.md 的"关键决策"表中。当前相关决策:
+v1.0 决策记录在 PROJECT.md 的"关键决策"表中。v1.1 新增决策:
 
-- [项目初始化]: 从零使用原始 OpenAI SDK 构建 agent 循环（不使用 LangChain/LangGraph）
-- [项目初始化]: 技术栈 Python 3.13 + FastAPI + Pydantic / React 19 + Vite 8 + Tailwind 4 + shadcn/ui
-- [项目初始化]: 阶段顺序遵循依赖链：循环 -> 工具 -> 上下文 -> 韧性 -> 可观测性
-- [项目初始化]: 首个业务验证场景为磁盘空间诊断与清理（阶段 2 验证）
-- [03-01]: 使用 tiktoken cl100k_base 编码做近似计数（D-03），跨模型误差 <5%
-- [03-01]: 溢出文件路径 `.sandbox/overflow/{session_id}_{tool_call_id}_{timestamp}.txt`
-- [03-01]: 溢出文件仅写入磁盘，FSM._handle_act 负责在注入上下文时替换为引用
-- [03-02]: 保留最近 3 轮完整对话（Claude's Discretion），不足 3 轮时不压缩
-- [03-02]: 摘要消息使用 role=system + [Compressed Summary] 前缀标记（T-03-02-01/02）
-- [03-02]: _find_round_cutoff 从末端反向遍历：只计数 assistant 消息 + tool_calls 为对话轮
-- [03-03]: TokenGuard 检查插入在 _handle_reason 的消息验证后、预算检查前，触发压缩时调用 ContextCompressor 并发布 context_compacted 事件
-- [03-03]: _handle_act 工具结果有 overflow_file 时使用引用格式替换上下文内容：[工具输出已保存至: {path} ({size}KB)] + 前 500 字符预览
-- [03-03]: session.messages 通过 clear()+extend() 原地替换，追加式存储原则（不修改已有消息）
-- [05-06]: ToolDetail JSON 语法着色采用 token 解析方案，不使用 dangerouslySetInnerHTML 满足 T-05-17
-- [05-06]: ConfirmationDialog 使用 Dialog onOpenChange 拦截关闭事件自动拒绝，兼顾 UX 和安全
-- [05-06]: Raw Events Tab 使用 join() 合并 JSON 字符串在 pre 中渲染，避免多 React 子节点问题
+- [v1.1]: 动态工具系统采用"管道式创建 + 三层防御 + 人工确认门"架构模式
+- [v1.1]: 零新增 Python 依赖——沙箱隔离全部使用 Python 3.12+ stdlib（ast、subprocess、resource、importlib.util）
+- [v1.1]: 前端仅新增 `@monaco-editor/react` 一个依赖，覆盖代码展示和 diff 对比
+- [v1.1]: 动态工具永不可获得 `PermissionLevel.SAFE`，最低为 MODERATE
+- [v1.1]: 动态工具使用 `dynamic.` 命名空间前缀 + 随机哈希后缀，与静态工具分区隔离
+- [v1.1]: AST 扫描做第一道快筛（不做信任边界），subprocess 子进程 + rlimit 做第二道隔离，用户确认做第三道安全门
+- [v1.1]: 阶段 8 和 10 可跳过 deep research（有完善模式参考），阶段 9 和 11 需 research-phase
 
 ### 待办事项
 
@@ -85,7 +75,10 @@ progress:
 
 ### 阻塞/关注点
 
-无。
+| 项 | 详情 |
+|----|------|
+| WSL2 外部沙箱兼容性 | Phase 9 的 seccomp-bpf / Landlock 需在 WSL2 内核验证，可能有降级方案 |
+| Monaco Editor React 19 兼容性 | `@monaco-editor/react@next` (4.8.0-rc.3) 是 RC 版本，需在 Phase 8 plan 阶段选定最终方案 |
 
 ## 延期项
 
@@ -95,13 +88,6 @@ progress:
 
 ## 会话连续性
 
-上次会话: 2026-05-30
-停止于: 05-06 ToolDetail + TokenUsageCard + ConfirmationDialog 完成
-恢复文件: .planning/phases/05-observability/05-06-SUMMARY.md
-
-## Current Position
-
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-05-31 — Milestone v1.1 started
+上次会话: 2026-05-31
+停止于: v1.1 路线图创建
+恢复文件: .planning/ROADMAP.md
