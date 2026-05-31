@@ -37,6 +37,21 @@ export function useSessionEvents(sessionId: string | null): { status: SSEStatus 
       if (eventType === "confirmation_required" && data.event_type === "confirmation_required") {
         useUIStore.getState().setPendingConfirmation(data);
       }
+
+      // Handle tool creation requested — set pending tool creation in UI store
+      if (eventType === "tool_creation_requested" && data.event_type === "tool_creation_requested") {
+        useUIStore.getState().setPendingToolCreation(data);
+      }
+
+      // Handle tool creation test result — update UI store
+      if (eventType === "tool_creation_test_result" && data.event_type === "tool_creation_test_result") {
+        useUIStore.getState().setToolCreationTestResult(data);
+      }
+
+      // Handle tool created — clear pending and close dialog
+      if (eventType === "tool_created" && data.event_type === "tool_created") {
+        useUIStore.getState().clearPendingToolCreation();
+      }
     },
     [sessionId, appendEvent, queryClient]
   );

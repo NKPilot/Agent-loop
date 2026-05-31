@@ -94,6 +94,29 @@ export async function confirmCommand(
   return handleResponse<void>(response);
 }
 
+export async function confirmToolCreation(
+  sessionId: string,
+  confirmationId: string,
+  approved: boolean,
+  persistence: string = "session",
+  extraDirs: string[] = [],
+): Promise<void> {
+  const response = await fetch(
+    `/api/sessions/${encodeURIComponent(sessionId)}/confirm-tool-creation`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirmation_id: confirmationId,
+        approved,
+        persistence,
+        extra_dirs: extraDirs,
+      }),
+    }
+  );
+  return handleResponse<void>(response);
+}
+
 export async function sendMessage(
   sessionId: string,
   content: string
