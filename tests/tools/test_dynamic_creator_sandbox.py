@@ -76,15 +76,14 @@ async def test_stage4_uses_hardened_sandbox():
     tool_code = "def test_func():\n    return 'ok'"
 
     # 自测代码：尝试网络连接（在 Linux 上被 unshare --net 阻断）
+    # 注意：不捕获异常，让 OSError 导致子进程非零退出码，
+    # 以便 SandboxExecutor._classify_violation() 检测到 network_attempt
     test_code = """
 import socket
-try:
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.settimeout(3)
-    s.connect(("8.8.8.8", 53))
-    print("SHOULD_NOT_REACH")
-except OSError as e:
-    print(f"EXPECTED_BLOCK: {e}")
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(3)
+s.connect(("8.8.8.8", 53))
+print("SHOULD_NOT_REACH")
 """
 
     result = await creator._stage4_self_test(
@@ -110,10 +109,9 @@ except OSError as e:
                 if event.get("event_type") == "sandbox_violation":
                     if event.get("violation_type") == "network_attempt":
                         violation_found = True
-                        assert "Network is unreachable" in event.get(
-                            "detail", ""
-                        ) or "unreachable" in event.get("detail", "").lower(), (
-                            f"事件详情应提及网络不可达，实际: {event['detail']}"
+                        detail = event.get("detail", "")
+                        assert "unshare" in detail.lower(), (
+                            f"事件详情应提及 unshare 网络隔离，实际: {detail}"
                         )
                         break
             except asyncio.QueueEmpty:
@@ -253,7 +251,7 @@ async def test_func_ref_creates_independent_sandbox():
     # 创建工具函数（通过内部 _make_func_ref）
     func = creator._make_func_ref(
         "dynamic.deadbeef_test_func",
-        "def dynamic_test_func():\n    print('hello from sandbox')",
+        "print('hello from sandbox')",
         "python",
         {},
     )
