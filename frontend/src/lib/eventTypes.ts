@@ -284,6 +284,32 @@ export interface ToolCreationFailedEvent extends EventBase {
   error_message: string;
 }
 
+// ── Sandbox security events (Phase 9) ────────────────────────────────────
+
+export interface SandboxTimeoutEvent extends EventBase {
+  event_type: "sandbox_timeout";
+  step_num: number;
+  tool_name: string;
+  timeout_seconds: number;
+}
+
+export interface SandboxViolationEvent extends EventBase {
+  event_type: "sandbox_violation";
+  step_num: number;
+  tool_name: string;
+  violation_type: "path_escape" | "network_attempt" | "sensitive_path";
+  detail: string;
+}
+
+export interface SandboxResourceExceededEvent extends EventBase {
+  event_type: "sandbox_resource_exceeded";
+  step_num: number;
+  tool_name: string;
+  resource_type: "memory" | "process" | "file_size";
+  limit: string;
+  detail: string;
+}
+
 // ── Resilience events (Phase 4) ───────────────────────────────────────
 
 export interface CheckpointSavedEvent extends EventBase {
@@ -358,7 +384,10 @@ export type Event =
   | ToolCreationRejectedEvent
   | ToolCreationTestResultEvent
   | ToolCreatedEvent
-  | ToolCreationFailedEvent;
+  | ToolCreationFailedEvent
+  | SandboxTimeoutEvent
+  | SandboxViolationEvent
+  | SandboxResourceExceededEvent;
 
 // ── Human-readable label map ──────────────────────────────────────────
 
@@ -395,4 +424,7 @@ export const EVENT_TYPE_MAP: Record<string, string> = {
   tool_creation_test_result: "Self-Test Result",
   tool_created: "Tool Created",
   tool_creation_failed: "Tool Creation Failed",
+  sandbox_timeout: "Sandbox Timeout",
+  sandbox_violation: "Sandbox Violation",
+  sandbox_resource_exceeded: "Resource Exceeded",
 };

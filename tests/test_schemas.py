@@ -21,6 +21,9 @@ from loopai.events.schemas import (
     LLMContentDone,
     LLMToken,
     LoopDetected,
+    SandboxResourceExceeded,
+    SandboxTimeout,
+    SandboxViolation,
     SessionEnd,
     StepEnd,
     StepStart,
@@ -105,7 +108,7 @@ class TestEventDiscriminatedUnion:
 
 
 class TestAllEventsUniqueType:
-    """Verify all 22 event_type values are unique."""
+    """Verify all 25 event_type values are unique."""
 
     def test_all_events_have_unique_type(self):
         event_classes = [
@@ -131,6 +134,9 @@ class TestAllEventsUniqueType:
             CircuitClosed,
             FailureRegistered,
             EscalationRequired,
+            SandboxTimeout,
+            SandboxViolation,
+            SandboxResourceExceeded,
         ]
         # Instantiate each with minimal required fields to get event_type
         event_types = set()
@@ -219,11 +225,23 @@ class TestAllEventsUniqueType:
                 kwargs["layer"] = 4
                 kwargs["attempt_count"] = 5
                 kwargs["error_message"] = "max retries exceeded"
+            if cls is SandboxTimeout:
+                kwargs["tool_name"] = "test"
+                kwargs["timeout_seconds"] = 30.0
+            if cls is SandboxViolation:
+                kwargs["tool_name"] = "test"
+                kwargs["violation_type"] = "network_attempt"
+                kwargs["detail"] = "test detail"
+            if cls is SandboxResourceExceeded:
+                kwargs["tool_name"] = "test"
+                kwargs["resource_type"] = "memory"
+                kwargs["limit"] = "512MB"
+                kwargs["detail"] = "test detail"
 
             event = cls(**kwargs)
             event_types.add(event.event_type)
 
-        assert len(event_types) == 22, f"Expected 22 unique event types, got {len(event_types)}: {event_types}"
+        assert len(event_types) == 25, f"Expected 25 unique event types, got {len(event_types)}: {event_types}"
 
 
 class TestJsonSerialization:
@@ -485,9 +503,9 @@ class TestNewEventsDiscriminatedUnion:
 
 
 class TestUpdatedEventTypeCount:
-    """Verify all event_type values are unique (now 22 events)."""
+    """Verify all event_type values are unique (now 25 events with Phase 9 sandbox)."""
 
-    def test_all_events_have_unique_type_22(self):
+    def test_all_events_have_unique_type_25(self):
         event_classes = [
             StepStart,
             StepEnd,
@@ -511,6 +529,9 @@ class TestUpdatedEventTypeCount:
             CircuitClosed,
             FailureRegistered,
             EscalationRequired,
+            SandboxTimeout,
+            SandboxViolation,
+            SandboxResourceExceeded,
         ]
         event_types = set()
         for cls in event_classes:
@@ -597,8 +618,266 @@ class TestUpdatedEventTypeCount:
                 kwargs["layer"] = 4
                 kwargs["attempt_count"] = 5
                 kwargs["error_message"] = "max retries exceeded"
+            if cls is SandboxTimeout:
+                kwargs["tool_name"] = "test"
+                kwargs["timeout_seconds"] = 30.0
+            if cls is SandboxViolation:
+                kwargs["tool_name"] = "test"
+                kwargs["violation_type"] = "network_attempt"
+                kwargs["detail"] = "test detail"
+            if cls is SandboxResourceExceeded:
+                kwargs["tool_name"] = "test"
+                kwargs["resource_type"] = "memory"
+                kwargs["limit"] = "512MB"
+                kwargs["detail"] = "test detail"
 
             event = cls(**kwargs)
             event_types.add(event.event_type)
 
-        assert len(event_types) == 22, f"Expected 22 unique event types, got {len(event_types)}: {event_types}"
+        assert len(event_types) == 25, f"Expected 25 unique event types, got {len(event_types)}: {event_types}"
+
+
+# ── 沙箱安全事件测试（Phase 9）──────────────────────────────────────────
+
+
+class TestSandboxTimeoutSchema:
+    """SandboxTimeout 事件类测试。"""
+
+    def test_instantiation_and_event_type(self):
+        e = SandboxTimeout(
+            session_id="test-session",
+            step_num=1,
+            tool_name="test_tool",
+            timeout_seconds=30.0,
+        )
+        assert e.event_type == "sandbox_timeout"
+        assert e.step_num == 1
+        assert e.tool_name == "test_tool"
+        assert e.timeout_seconds == 30.0
+
+    def test_timestamp_auto_filled(self):
+        e = SandboxTimeout(
+            session_id="test-session",
+            step_num=1,
+            tool_name="test_tool",
+            timeout_seconds=30.0,
+        )
+        assert e.timestamp is not None
+        assert "T" in e.timestamp
+        assert e.timestamp.endswith("Z") or "+00:00" in e.timestamp
+
+    def test_model_dump_json_serializable(self):
+        e = SandboxTimeout(
+            session_id="test-session",
+            step_num=5,
+            tool_name="disk_diagnostic",
+            timeout_seconds=60.0,
+        )
+        d = e.model_dump()
+        json_str = json.dumps(d)
+        restored_data = json.loads(json_str)
+        assert restored_data["event_type"] == "sandbox_timeout"
+        assert restored_data["step_num"] == 5
+        assert restored_data["timeout_seconds"] == 60.0
+
+
+class TestSandboxViolationSchema:
+    """SandboxViolation 事件类测试。"""
+
+    def test_instantiation_and_event_type(self):
+        e = SandboxViolation(
+            session_id="test-session",
+            step_num=2,
+            tool_name="test_tool",
+            violation_type="network_attempt",
+            detail="Network is unreachable",
+        )
+        assert e.event_type == "sandbox_violation"
+        assert e.violation_type == "network_attempt"
+        assert e.detail == "Network is unreachable"
+
+    def test_violation_type_all_valid_values(self):
+        valid_types = ["path_escape", "network_attempt", "sensitive_path"]
+        for vt in valid_types:
+            e = SandboxViolation(
+                session_id="test",
+                step_num=1,
+                tool_name="t",
+                violation_type=vt,
+                detail="test",
+            )
+            assert e.violation_type == vt
+
+    def test_invalid_violation_type_rejected(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            SandboxViolation(
+                session_id="test",
+                step_num=1,
+                tool_name="t",
+                violation_type="invalid_type",  # type: ignore[arg-type]
+                detail="test",
+            )
+
+    def test_path_escape_violation(self):
+        e = SandboxViolation(
+            session_id="test",
+            step_num=3,
+            tool_name="bash_exec",
+            violation_type="path_escape",
+            detail="路径 /etc/passwd 不在白名单内",
+        )
+        assert e.event_type == "sandbox_violation"
+        assert e.step_num == 3
+        assert e.violation_type == "path_escape"
+
+    def test_sensitive_path_violation(self):
+        e = SandboxViolation(
+            session_id="test",
+            step_num=4,
+            tool_name="file_read",
+            violation_type="sensitive_path",
+            detail="敏感路径访问被阻止",
+        )
+        assert e.violation_type == "sensitive_path"
+
+
+class TestSandboxResourceExceededSchema:
+    """SandboxResourceExceeded 事件类测试。"""
+
+    def test_instantiation_and_event_type(self):
+        e = SandboxResourceExceeded(
+            session_id="test-session",
+            step_num=3,
+            tool_name="test_tool",
+            resource_type="memory",
+            limit="512MB",
+            detail="Memory limit exceeded",
+        )
+        assert e.event_type == "sandbox_resource_exceeded"
+        assert e.resource_type == "memory"
+        assert e.limit == "512MB"
+
+    def test_resource_type_all_valid_values(self):
+        valid_types = ["memory", "process", "file_size"]
+        for rt in valid_types:
+            e = SandboxResourceExceeded(
+                session_id="test",
+                step_num=1,
+                tool_name="t",
+                resource_type=rt,
+                limit="0",
+                detail="test",
+            )
+            assert e.resource_type == rt
+
+    def test_invalid_resource_type_rejected(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            SandboxResourceExceeded(
+                session_id="test",
+                step_num=1,
+                tool_name="t",
+                resource_type="invalid_type",  # type: ignore[arg-type]
+                limit="0",
+                detail="test",
+            )
+
+    def test_process_resource_limit(self):
+        e = SandboxResourceExceeded(
+            session_id="test",
+            step_num=5,
+            tool_name="fork_bomb_detector",
+            resource_type="process",
+            limit="0",
+            detail="RLIMIT_NPROC 阻止 fork",
+        )
+        assert e.resource_type == "process"
+        assert e.limit == "0"
+
+    def test_file_size_resource_limit(self):
+        e = SandboxResourceExceeded(
+            session_id="test",
+            step_num=6,
+            tool_name="log_writer",
+            resource_type="file_size",
+            limit="100MB",
+            detail="文件大小超限",
+        )
+        assert e.resource_type == "file_size"
+        assert e.limit == "100MB"
+
+
+class TestSandboxEventsDiscriminatedUnion:
+    """验证 3 个新事件类可通过 Event 区分联合类型正确反序列化。"""
+
+    def test_sandbox_timeout_deserialization(self):
+        e = SandboxTimeout(
+            session_id="verify",
+            step_num=10,
+            tool_name="verify_tool",
+            timeout_seconds=30.0,
+        )
+        ta = TypeAdapter(Event)
+        restored = ta.validate_python(e.model_dump())
+        assert isinstance(restored, SandboxTimeout)
+        assert restored.event_type == "sandbox_timeout"
+        assert restored.timeout_seconds == 30.0
+
+    def test_sandbox_violation_deserialization(self):
+        e = SandboxViolation(
+            session_id="verify",
+            step_num=10,
+            tool_name="verify_tool",
+            violation_type="network_attempt",
+            detail="Network is unreachable",
+        )
+        ta = TypeAdapter(Event)
+        restored = ta.validate_python(e.model_dump())
+        assert isinstance(restored, SandboxViolation)
+        assert restored.violation_type == "network_attempt"
+
+    def test_sandbox_resource_exceeded_deserialization(self):
+        e = SandboxResourceExceeded(
+            session_id="verify",
+            step_num=10,
+            tool_name="verify_tool",
+            resource_type="memory",
+            limit="512MB",
+            detail="Memory limit exceeded",
+        )
+        ta = TypeAdapter(Event)
+        restored = ta.validate_python(e.model_dump())
+        assert isinstance(restored, SandboxResourceExceeded)
+        assert restored.resource_type == "memory"
+
+    def test_round_trip_all_three(self):
+        events = [
+            SandboxTimeout(
+                session_id="rt", step_num=1, tool_name="t1", timeout_seconds=30.0
+            ),
+            SandboxViolation(
+                session_id="rt",
+                step_num=1,
+                tool_name="t2",
+                violation_type="sensitive_path",
+                detail="Blocked",
+            ),
+            SandboxResourceExceeded(
+                session_id="rt",
+                step_num=1,
+                tool_name="t3",
+                resource_type="file_size",
+                limit="100MB",
+                detail="Too large",
+            ),
+        ]
+        ta = TypeAdapter(Event)
+        for e in events:
+            d = e.model_dump()
+            restored = ta.validate_python(d)
+            assert type(restored) is type(e)
+            json_str = json.dumps(e.model_dump(mode="json"))
+            assert isinstance(json.loads(json_str), dict)
