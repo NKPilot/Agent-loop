@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GSD 工作流全景图</title>
+<style>
+  :root {
+    --bg: #faf9f5;
+    --card: #ffffff;
+    --text: #2d2a24;
+    --muted: #777268;
+    --border: #e8e4db;
+    --orange: #d97706;
+    --orange-bg: #fef3c7;
+    --blue: #2563eb;
+    --blue-bg: #eff6ff;
+    --green: #16a34a;
+    --green-bg: #f0fdf4;
+    --purple: #9333ea;
+    --purple-bg: #faf5ff;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --gray: #78716c;
+    --gray-bg: #f5f4f1;
+    --teal: #0d9488;
+    --teal-bg: #f0fdfa;
+    --pink: #db2777;
+    --pink-bg: #fdf2f8;
+    --indigo: #4f46e5;
+    --indigo-bg: #eef2ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #1e1b18 0%, #2d2a24 100%);
+    color: #faf9f5;
+    padding: 48px 0 40px;
+    text-align: center;
+  }
+  .header h1 { font-size: 36px; font-weight: 800; letter-spacing: -1px; }
+  .header .sub { color: #a8a29e; font-size: 15px; margin-top: 8px; }
+  .header .badges { margin-top: 16px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .header .badge {
+    font-size: 11px; font-weight: 600; padding: 4px 12px;
+    border-radius: 14px; letter-spacing: 0.3px;
+  }
+  .badge.green { background: #065f46; color: #6ee7b7; }
+  .badge.blue { background: #1e3a5f; color: #93c5fd; }
+  .badge.purple { background: #3b0764; color: #c4b5fd; }
+  .badge.orange { background: #431407; color: #fbbf24; }
+
+  /* Container */
+  .container { max-width: 1300px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  /* Section */
+  .section { margin-bottom: 48px; }
+  .section-title {
+    font-size: 22px; font-weight: 700; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-title .num {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; color: #fff;
+  }
+
+  /* == Lifecycle Flow == */
+  .lifecycle {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; flex-wrap: wrap; margin-bottom: 32px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 28px 16px; overflow-x: auto;
+  }
+  .lc-node {
+    padding: 14px 18px; border-radius: 10px; text-align: center;
+    font-size: 13px; font-weight: 600; white-space: nowrap;
+    border: 1.5px solid transparent; transition: transform 0.12s;
+    min-width: 90px;
+  }
+  .lc-node:hover { transform: translateY(-2px); }
+  .lc-node .icon { font-size: 20px; display: block; margin-bottom: 4px; }
+  .lc-arrow { color: var(--muted); font-size: 20px; flex-shrink: 0; }
+  .lc-node.n1 { background: var(--blue-bg); color: var(--blue); border-color: #bfdbfe; }
+  .lc-node.n2 { background: var(--purple-bg); color: var(--purple); border-color: #ddd6fe; }
+  .lc-node.n3 { background: var(--orange-bg); color: var(--orange); border-color: #fde68a; }
+  .lc-node.n4 { background: var(--green-bg); color: var(--green); border-color: #bbf7d0; }
+  .lc-node.n5 { background: var(--teal-bg); color: var(--teal); border-color: #99f6e4; }
+  .lc-node.n6 { background: var(--red-bg); color: var(--red); border-color: #fecaca; }
+  .lc-node.n7 { background: var(--indigo-bg); color: var(--indigo); border-color: #c7d2fe; }
+
+  /* == Workflow Detail Cards == */
+  .wf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
+  .wf-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+    transition: box-shadow 0.15s;
+  }
+  .wf-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+  .wf-card-header {
+    padding: 16px 20px; display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid var(--border); cursor: pointer;
+  }
+  .wf-card-header .tag {
+    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 6px;
+    letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  .tag.cmd { background: var(--orange-bg); color: var(--orange); }
+  .tag.agent { background: var(--purple-bg); color: var(--purple); }
+  .tag.state { background: var(--blue-bg); color: var(--blue); }
+  .tag.gate { background: var(--red-bg); color: var(--red); }
+  .tag.output { background: var(--green-bg); color: var(--green); }
+  .wf-card-header h3 { font-size: 15px; font-weight: 600; }
+  .wf-card-body { padding: 16px 20px; }
+  .wf-card-body .desc { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+  .wf-card-body .steps {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .wf-card-body .step {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 12.5px; padding: 6px 10px; border-radius: 6px;
+    background: var(--bg);
+  }
+  .wf-card-body .step .s-num {
+    min-width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .s-num.c1 { background: var(--blue); }
+  .s-num.c2 { background: var(--purple); }
+  .s-num.c3 { background: var(--orange); }
+  .s-num.c4 { background: var(--green); }
+  .s-num.c5 { background: var(--teal); }
+  .s-num.c6 { background: var(--pink); }
+
+  .wf-card-body .outputs {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px dashed var(--border);
+    font-size: 11.5px; color: var(--muted);
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  .outputs .out {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 10.5px; background: var(--green-bg);
+    color: var(--green); padding: 2px 8px; border-radius: 4px;
+  }
+
+  /* == Subagent Diagram == */
+  .subagent-diagram {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 28px; margin-top: 24px;
+  }
+  .subagent-diagram h3 { font-size: 15px; margin-bottom: 20px; }
+  .sa-grid { display: flex; flex-direction: column; gap: 14px; }
+  .sa-row { display: flex; align-items: center; gap: 12px; }
+  .sa-orch {
+    padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    background: var(--accent-light, #fef3c7); color: var(--accent, #d97706);
+    border: 1.5px solid var(--accent, #d97706); min-width: 130px; text-align: center;
+  }
+  .sa-arrow { color: var(--muted); font-size: 16px; }
+  .sa-agents {
+    display: flex; flex-wrap: wrap; gap: 8px;
+  }
+  .sa-agent {
+    padding: 6px 14px; border-radius: 6px; font-size: 11.5px; font-weight: 500;
+    border: 1px solid var(--border);
+  }
+  .sa-agent.r { background: var(--purple-bg); color: var(--purple); border-color: #ddd6fe; }
+  .sa-agent.p { background: var(--blue-bg); color: var(--blue); border-color: #bfdbfe; }
+  .sa-agent.e { background: var(--green-bg); color: var(--green); border-color: #bbf7d0; }
+  .sa-agent.c { background: var(--red-bg); color: var(--red); border-color: #fecaca; }
+  .sa-agent.v { background: var(--teal-bg); color: var(--teal); border-color: #99f6e4; }
+  .sa-agent.m { background: var(--orange-bg); color: var(--orange); border-color: #fde68a; }
+
+  /* == State Transitions == */
+  .state-flow {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 28px; margin-top: 24px;
+    overflow-x: auto;
+  }
+  .state-flow h3 { font-size: 15px; margin-bottom: 20px; }
+  .state-inner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .state-node {
+    padding: 10px 18px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    border: 1.5px solid; text-align: center;
+  }
+  .st-defining { background: var(--blue-bg); color: var(--blue); border-color: #bfdbfe; }
+  .st-planning { background: var(--purple-bg); color: var(--purple); border-color: #ddd6fe; }
+  .st-context { background: var(--orange-bg); color: var(--orange); border-color: #fde68a; }
+  .st-research { background: var(--pink-bg); color: var(--pink); border-color: #fbcfe8; }
+  .st-planned { background: var(--teal-bg); color: var(--teal); border-color: #99f6e4; }
+  .st-executing { background: var(--green-bg); color: var(--green); border-color: #bbf7d0; }
+  .st-complete { background: var(--indigo-bg); color: var(--indigo); border-color: #c7d2fe; }
+
+  /* == Files Table == */
+  .files-table {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; margin-top: 24px;
+  }
+  .files-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .files-table th {
+    text-align: left; padding: 10px 16px; font-size: 11px;
+    font-weight: 600; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.5px; background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .files-table td {
+    padding: 9px 16px; border-bottom: 1px solid var(--border);
+  }
+  .files-table tr:last-child td { border-bottom: none; }
+  .files-table .fn { font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 12px; }
+  .files-table .by { font-size: 11px; color: var(--muted); }
+
+  /* Footer */
+  .footer {
+    text-align: center; padding: 20px; color: var(--muted);
+    font-size: 12px; border-top: 1px solid var(--border); margin-top: 48px;
+  }
+
+  /* Note callout */
+  .note {
+    background: var(--blue-bg); border: 1px solid #bfdbfe;
+    border-radius: 8px; padding: 14px 18px; font-size: 12.5px;
+    color: #1e40af; margin-top: 16px;
+  }
+  .note strong { color: #1e3a5f; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>GSD 工作流全景</h1>
+  <p class="sub">Get Shit Done — 从想法到交付的完整命令编排链</p>
+  <div class="badges">
+    <span class="badge green">7 个核心命令</span>
+    <span class="badge blue">4 种工作目录</span>
+    <span class="badge purple">12 种子 Agent</span>
+    <span class="badge orange">6 个状态转换</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ===== 1. 完整生命周期 ===== -->
+  <div class="section">
+    <div class="section-title"><span class="num" style="background:var(--orange)">1</span> 完整生命周期</div>
+    <div class="lifecycle">
+      <div class="lc-node n1"><span class="icon">&#127959;</span>new-project</div>
+      <div class="lc-arrow">→</div>
+      <div class="lc-node n2"><span class="icon">&#128640;</span>new-milestone</div>
+      <div class="lc-arrow">→</div>
+      <div class="lc-node n3"><span class="icon">&#128172;</span>discuss-phase</div>
+      <div class="lc-arrow">→</div>
+      <div class="lc-node n4"><span class="icon">&#128221;</span>plan-phase</div>
+      <div class="lc-arrow">→</div>
+      <div class="lc-node n5"><span class="icon">&#9889;</span>execute-phase</div>
+      <div class="lc-arrow">→</div>
+      <div class="lc-node n6"><span class="icon">&#128269;</span>verify-work</div>
+      <div class="lc-arrow">→</div>
+      <div class="lc-node n7"><span class="icon">&#127942;</span>complete-milestone</div>
+    </div>
+    <div class="note">
+      <strong>循环模型：</strong> 每个 Phase 重复 discuss → plan → execute → verify。一个 Milestone 包含多个 Phase。
+      所有 Phase 完成后 complete-milestone 归档，然后 new-milestone 启动下一个周期。
+    </div>
+  </div>
+
+  <!-- ===== 2. 命令详解 ===== -->
+  <div class="section">
+    <div class="section-title"><span class="num" style="background:var(--blue)">2</span> 核心命令详解</div>
+    <div class="wf-grid">
+
+      <!-- new-project -->
+      <div class="wf-card">
+        <div class="wf-card-header">
+          <span class="tag cmd">命令</span>
+          <h3>/gsd-new-project</h3>
+        </div>
+        <div class="wf-card-body">
+          <div class="desc">初始化全新项目。深度上下文采集 → PROJECT.md → 需求 → 路线图。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> 提问环节 — 项目是什么、技术栈偏好、约束</div>
+            <div class="step"><span class="s-num c2">2</span> 并行研究 — 4 路 project-researcher (Stack/Features/Arch/Pitfalls)</div>
+            <div class="step"><span class="s-num c3">3</span> 需求定义 — 分类 scoping，生成 REQUIREMENTS.md + REQ-ID</div>
+            <div class="step"><span class="s-num c4">4</span> 路线图创建 — roadmapper 生成 ROADMAP.md + STATE.md</div>
+          </div>
+          <div class="outputs">
+            <span class="out">.planning/PROJECT.md</span>
+            <span class="out">.planning/ROADMAP.md</span>
+            <span class="out">.planning/STATE.md</span>
+            <span class="out">.planning/REQUIREMENTS.md</span>
+            <span class="out">.planning/research/</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- new-milestone -->
+      <div class="wf-card">
+        <div class="wf-card-header">
+          <span class="tag cmd">命令</span>
+          <h3>/gsd-new-milestone</h3>
+        </div>
+        <div class="wf-card-body">
+          <div class="desc">启动新里程碑。加载旧 PROJECT.md → 采集目标 → 更新 → 需求 → 路线图。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> 采集里程碑目标 — MILESTONE-CONTEXT 或对话</div>
+            <div class="step"><span class="s-num c2">2</span> 确定版本号 + 验证理解</div>
+            <div class="step"><span class="s-num c3">3</span> 更新 PROJECT.md + 重置 STATE.md</div>
+            <div class="step"><span class="s-num c4">4</span> 可选研究 (4 researcher → synthesizer)</div>
+            <div class="step"><span class="s-num c5">5</span> 需求定义 + 路线图创建 (roadmapper)</div>
+          </div>
+          <div class="outputs">
+            <span class="out">PROJECT.md (更新)</span>
+            <span class="out">STATE.md (重置)</span>
+            <span class="out">ROADMAP.md (追加)</span>
+            <span class="out">REQUIREMENTS.md (新里程碑)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- discuss-phase -->
+      <div class="wf-card">
+        <div class="wf-card-header">
+          <span class="tag cmd">命令</span>
+          <span class="tag agent">子 Agent × 2</span>
+          <h3>/gsd-discuss-phase</h3>
+        </div>
+        <div class="wf-card-body">
+          <div class="desc">收集阶段实现决策。分析灰区 → 用户选择 → 深度讨论 → 记录决策。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> 加载先验上下文 (PROJECT/REQUIREMENTS/STATE + 前 3 个 CONTEXT)</div>
+            <div class="step"><span class="s-num c2">2</span> 代码库侦察 — 复用资产、现有模式、集成点</div>
+            <div class="step"><span class="s-num c3">3</span> 识别灰区 — 标注已有决策，跳过已决定问题</div>
+            <div class="step"><span class="s-num c4">4</span> 用户选择讨论区 → 逐区深度讨论 (每区 4 问)</div>
+            <div class="step"><span class="s-num c5">5</span> 写 CONTEXT.md + DISCUSSION-LOG.md</div>
+          </div>
+          <div class="outputs">
+            <span class="out">{phase}-CONTEXT.md</span>
+            <span class="out">{phase}-DISCUSSION-LOG.md</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- plan-phase -->
+      <div class="wf-card">
+        <div class="wf-card-header">
+          <span class="tag cmd">命令</span>
+          <span class="tag agent">子 Agent × 3</span>
+          <h3>/gsd-plan-phase</h3>
+        </div>
+        <div class="wf-card-body">
+          <div class="desc">创建可执行计划。可选研究 → 规划 → 验证 → 修订循环 (最多 3 轮)。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> 加载 CONTEXT.md — 用户决策锁</div>
+            <div class="step"><span class="s-num c2">2</span> 可选研究 — gsd-phase-researcher 生成 RESEARCH.md</div>
+            <div class="step"><span class="s-num c3">3</span> 可选 UI-SPEC — gsd-ui-phase 生成设计契约</div>
+            <div class="step"><span class="s-num c4">4</span> 生成计划 — gsd-planner 写 PLAN.md 文件</div>
+            <div class="step"><span class="s-num c5">5</span> 验证计划 — gsd-plan-checker → 修订循环 (≤3 轮)</div>
+            <div class="step"><span class="s-num c6">6</span> 需求覆盖门 + 决策覆盖门 → 提交</div>
+          </div>
+          <div class="outputs">
+            <span class="out">{phase}-PLAN.md (×N)</span>
+            <span class="out">{phase}-RESEARCH.md</span>
+            <span class="out">{phase}-PATTERNS.md</span>
+            <span class="out">STATE.md (更新)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- execute-phase -->
+      <div class="wf-card">
+        <div class="wf-card-header">
+          <span class="tag cmd">命令</span>
+          <span class="tag agent">子 Agent × N</span>
+          <h3>/gsd-execute-phase</h3>
+        </div>
+        <div class="wf-card-body">
+          <div class="desc">波次并行执行。发现计划 → 按波分组 → 并行 spawn → 合并 → 验证。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> 发现计划 — plan-index 按波分组</div>
+            <div class="step"><span class="s-num c2">2</span> 每波: 文件冲突检测 → 串行化重叠计划</div>
+            <div class="step"><span class="s-num c3">3</span> spawn gsd-executor (worktree 隔离) × 波内计划数</div>
+            <div class="step"><span class="s-num c4">4</span> 合并 worktree → post-merge 测试门</div>
+            <div class="step"><span class="s-num c5">5</span> 更新 ROADMAP/STATE 追踪</div>
+            <div class="step"><span class="s-num c6">6</span> 全波完成 → 代码审查门 → 回归门 → 验证阶段目标</div>
+          </div>
+          <div class="outputs">
+            <span class="out">{phase}-SUMMARY.md (×N)</span>
+            <span class="out">{phase}-VERIFICATION.md</span>
+            <span class="out">ROADMAP.md (更新)</span>
+            <span class="out">STATE.md (更新)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- verify-work -->
+      <div class="wf-card">
+        <div class="wf-card-header">
+          <span class="tag cmd">命令</span>
+          <span class="tag gate">门</span>
+          <h3>/gsd-verify-work</h3>
+        </div>
+        <div class="wf-card-body">
+          <div class="desc">对话式用户验收测试。基于 VERIFICATION.md 的 human_verification 项逐项确认。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> 加载 VERIFICATION.md → 提取 human_verification 项</div>
+            <div class="step"><span class="s-num c2">2</span> 逐项交互式确认 (approved / issue found)</div>
+            <div class="step"><span class="s-num c3">3</span> 如有问题 → 生成 UAT.md gap → /gsd-plan-phase --gaps</div>
+            <div class="step"><span class="s-num c4">4</span> 全部通过 → 标记完成</div>
+          </div>
+          <div class="outputs">
+            <span class="out">{phase}-UAT.md</span>
+            <span class="out">STATE.md (更新)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- complete-milestone -->
+      <div class="wf-card">
+        <div class="wf-card-header">
+          <span class="tag cmd">命令</span>
+          <span class="tag state">状态转换</span>
+          <h3>/gsd-complete-milestone</h3>
+        </div>
+        <div class="wf-card-body">
+          <div class="desc">归档已完成里程碑，清理旧阶段产物，准备下一个里程碑。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> 验证所有阶段完成 (VERIFICATION.md + SUMMARY.md)</div>
+            <div class="step"><span class="s-num c2">2</span> 更新 MILESTONES.md 记录</div>
+            <div class="step"><span class="s-num c3">3</span> 归档阶段目录 → archive/</div>
+            <div class="step"><span class="s-num c4">4</span> 更新 PROJECT.md 演进记录</div>
+            <div class="step"><span class="s-num c5">5</span> 清理 STATE.md → 准备 new-milestone</div>
+          </div>
+          <div class="outputs">
+            <span class="out">MILESTONES.md (更新)</span>
+            <span class="out">PROJECT.md (演进)</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== 3. 子 Agent 体系 ===== -->
+  <div class="section">
+    <div class="section-title"><span class="num" style="background:var(--purple)">3</span> 子 Agent 体系</div>
+
+    <div class="subagent-diagram">
+      <h3>plan-phase 的 Agent 编排链</h3>
+      <div class="sa-grid">
+        <div class="sa-row">
+          <div class="sa-orch">plan-phase 编排器</div>
+          <div class="sa-arrow">→</div>
+          <div class="sa-agents">
+            <span class="sa-agent r">gsd-phase-researcher</span>
+            <span class="sa-arrow">→</span>
+            <span class="sa-agent p">gsd-pattern-mapper</span>
+            <span class="sa-arrow">→</span>
+            <span class="sa-agent p">gsd-planner</span>
+            <span class="sa-arrow">→</span>
+            <span class="sa-agent c">gsd-plan-checker</span>
+          </div>
+          <span class="sa-arrow">↻ ≤3</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="subagent-diagram" style="margin-top:16px">
+      <h3>execute-phase 的 Agent 编排链</h3>
+      <div class="sa-grid">
+        <div class="sa-row">
+          <div class="sa-orch">execute-phase 编排器</div>
+          <div class="sa-arrow">→</div>
+          <div class="sa-agents">
+            <span class="sa-agent e">gsd-executor (×N)</span>
+            <span class="sa-arrow">→</span>
+            <span class="sa-agent e">gsd-executor (×N)</span>
+            <span class="sa-arrow">→</span>
+            <span class="sa-agent v">gsd-verifier</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="subagent-diagram" style="margin-top:16px">
+      <h3>new-project / new-milestone 的 Agent 编排链</h3>
+      <div class="sa-grid">
+        <div class="sa-row">
+          <div class="sa-orch">new-project 编排器</div>
+          <div class="sa-arrow">→</div>
+          <div class="sa-agents">
+            <span class="sa-agent r">gsd-project-researcher ×4 (并行)</span>
+            <span class="sa-arrow">→</span>
+            <span class="sa-agent r">gsd-research-synthesizer</span>
+            <span class="sa-arrow">→</span>
+            <span class="sa-agent m">gsd-roadmapper</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="subagent-diagram" style="margin-top:16px">
+      <h3>全部子 Agent 类型</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+        <span class="sa-agent r">gsd-project-researcher</span>
+        <span class="sa-agent r">gsd-phase-researcher</span>
+        <span class="sa-agent r">gsd-research-synthesizer</span>
+        <span class="sa-agent r">gsd-ui-researcher</span>
+        <span class="sa-agent r">gsd-domain-researcher</span>
+        <span class="sa-agent p">gsd-roadmapper</span>
+        <span class="sa-agent p">gsd-planner</span>
+        <span class="sa-agent p">gsd-pattern-mapper</span>
+        <span class="sa-agent c">gsd-plan-checker</span>
+        <span class="sa-agent c">gsd-ui-checker</span>
+        <span class="sa-agent c">gsd-code-reviewer</span>
+        <span class="sa-agent e">gsd-executor</span>
+        <span class="sa-agent v">gsd-verifier</span>
+        <span class="sa-agent v">gsd-integration-checker</span>
+        <span class="sa-agent v">gsd-nyquist-auditor</span>
+        <span class="sa-agent v">gsd-security-auditor</span>
+        <span class="sa-agent v">gsd-ui-auditor</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 4. 状态流转 ===== -->
+  <div class="section">
+    <div class="section-title"><span class="num" style="background:var(--teal)">4</span> STATE.md 状态流转</div>
+    <div class="state-flow">
+      <div class="state-inner">
+        <div class="state-node st-defining">Defining Requirements</div>
+        <span style="color:var(--muted);font-size:20px">→</span>
+        <div class="state-node st-planning">Planning</div>
+        <span style="color:var(--muted);font-size:20px">→</span>
+        <div class="state-node st-context">Context Gathered</div>
+        <span style="color:var(--muted);font-size:20px">→</span>
+        <div class="state-node st-research">Research Complete</div>
+        <span style="color:var(--muted);font-size:20px">→</span>
+        <div class="state-node st-planned">Ready to Execute</div>
+        <span style="color:var(--muted);font-size:20px">→</span>
+        <div class="state-node st-executing">Executing</div>
+        <span style="color:var(--muted);font-size:20px">→</span>
+        <div class="state-node st-complete">Milestone Complete</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 5. 产物文件 ===== -->
+  <div class="section">
+    <div class="section-title"><span class="num" style="background:var(--pink)">5</span> .planning/ 产物对照表</div>
+    <div class="files-table">
+      <table>
+        <tr><th>文件</th><th>由谁生成</th><th>用途</th></tr>
+        <tr><td class="fn">PROJECT.md</td><td class="by">new-project / new-milestone</td><td>项目定义、核心价值、需求、约束、决策日志</td></tr>
+        <tr><td class="fn">ROADMAP.md</td><td class="by">roadmapper (new-project/new-milestone)</td><td>阶段结构、依赖、成功标准、进度追踪</td></tr>
+        <tr><td class="fn">STATE.md</td><td class="by">所有命令自动更新</td><td>当前位置、进度、决策、阻塞项、会话连续性</td></tr>
+        <tr><td class="fn">REQUIREMENTS.md</td><td class="by">new-project / new-milestone</td><td>REQ-ID 编号需求 + 可追溯性映射</td></tr>
+        <tr><td class="fn">MILESTONES.md</td><td class="by">complete-milestone</td><td>已发布里程碑归档记录</td></tr>
+        <tr><td class="fn">{phase}-CONTEXT.md</td><td class="by">discuss-phase</td><td>用户锁定的实现决策 (给 planner/researcher 读)</td></tr>
+        <tr><td class="fn">{phase}-DISCUSSION-LOG.md</td><td class="by">discuss-phase</td><td>讨论审计日志 (仅人类参考)</td></tr>
+        <tr><td class="fn">{phase}-RESEARCH.md</td><td class="by">gsd-phase-researcher (plan-phase)</td><td>技术研究、集成点、陷阱和方案</td></tr>
+        <tr><td class="fn">{phase}-PATTERNS.md</td><td class="by">gsd-pattern-mapper (plan-phase)</td><td>现有代码模式到新文件的映射</td></tr>
+        <tr><td class="fn">{phase}-PLAN.md (×N)</td><td class="by">gsd-planner (plan-phase)</td><td>可执行任务分解 + frontmatter 元数据</td></tr>
+        <tr><td class="fn">{phase}-SUMMARY.md (×N)</td><td class="by">gsd-executor (execute-phase)</td><td>执行完成报告 + 交付物列表</td></tr>
+        <tr><td class="fn">{phase}-VERIFICATION.md</td><td class="by">gsd-verifier (execute-phase)</td><td>目标达成验证 + must-haves 清单</td></tr>
+        <tr><td class="fn">{phase}-UAT.md</td><td class="by">verify-work</td><td>用户验收测试记录和 gap 追踪</td></tr>
+        <tr><td class="fn">{phase}-VALIDATION.md</td><td class="by">plan-phase (Nyquist)</td><td>基于 RESEARCH.md 的验证策略</td></tr>
+        <tr><td class="fn">{phase}-UI-SPEC.md</td><td class="by">gsd-ui-researcher (ui-phase)</td><td>前端 UI 设计契约</td></tr>
+        <tr><td class="fn">{phase}-REVIEW.md</td><td class="by">gsd-code-reviewer (review)</td><td>代码审查结果</td></tr>
+        <tr><td class="fn">{phase}-SECURITY.md</td><td class="by">gsd-security-auditor</td><td>安全威胁审计</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== 6. Worktree 隔离机制 ===== -->
+  <div class="section">
+    <div class="section-title"><span class="num" style="background:var(--green)">6</span> execute-phase 并行隔离机制</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(350px,1fr));gap:14px">
+      <div class="wf-card">
+        <div class="wf-card-header"><span class="tag gate">机制</span><h3>Wave 波次模型</h3></div>
+        <div class="wf-card-body">
+          <div class="desc">计划按依赖关系分组为波次。波 1 先执行，完成后波 2 才能在波 1 产物基础上构建。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> PLAN.md frontmatter 声明 wave 编号</div>
+            <div class="step"><span class="s-num c2">2</span> 编排器按 wave 分组，逐波执行</div>
+            <div class="step"><span class="s-num c3">3</span> 波内并行 (无文件冲突时)，波间串行</div>
+            <div class="step"><span class="s-num c4">4</span> 每波结束: 合并 worktree → 测试门 → 下一波</div>
+          </div>
+        </div>
+      </div>
+      <div class="wf-card">
+        <div class="wf-card-header"><span class="tag gate">机制</span><h3>Git Worktree 隔离</h3></div>
+        <div class="wf-card-body">
+          <div class="desc">每个 executor Agent 在独立 git worktree 中运行。避免并行计划之间的文件冲突。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> Agent(isolation="worktree") 创建临时分支</div>
+            <div class="step"><span class="s-num c2">2</span> executor 在隔离目录中提交</div>
+            <div class="step"><span class="s-num c3">3</span> 波结束: merge --no-ff 回到主分支</div>
+            <div class="step"><span class="s-num c4">4</span> 文件冲突检测: 重叠则串行化该波</div>
+          </div>
+        </div>
+      </div>
+      <div class="wf-card">
+        <div class="wf-card-header"><span class="tag gate">机制</span><h3>Worktree 路径安全</h3></div>
+        <div class="wf-card-body">
+          <div class="desc">executor 不得修改 STATE.md/ROADMAP.md。编排器在所有 worktree 合并后统一更新。</div>
+          <div class="steps">
+            <div class="step"><span class="s-num c1">1</span> executor 提交 SUMMARY.md 到工作树</div>
+            <div class="step"><span class="s-num c2">2</span> 合并时 STATE.md/ROADMAP.md 主分支版本优先</div>
+            <div class="step"><span class="s-num c3">3</span> 编排器单点更新追踪文件</div>
+            <div class="step"><span class="s-num c4">4</span> 前删除检查 + 批量删除审计门</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  loopAI · GSD Workflow Visualization · Generated 2026-05-31
+</div>
+
+</body>
+</html>
