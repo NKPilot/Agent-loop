@@ -466,22 +466,13 @@ class SandboxResourceExceeded(EventBase):
 | A4 | `RLIMIT_FSIZE=100MB` 对工具输出足够 [ASSUMED] | Common Pitfalls | 文件处理工具可能产生更大输出；100MB 是初始保守值 |
 | A5 | 非 Linux 平台（macOS/Windows 原生）上跳过网络隔离是可接受的安全降级 [ASSUMED] | Architecture Patterns | LLM 生成代码在非 Linux 上运行时可能通过网络外泄数据；macOS 可用 `sandbox-exec` 替代 |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **unshare 包装与 preexec_fn rlimit 的交互**
-   - What we know: 子进程继承父进程的 rlimit（fork 继承）。unshare 创建新命名空间，不会自动重置 rlimit。
-   - What's unclear: `unshare --map-root-user` 创建的命名空间内伪 root 是否有权提升 rlimit 硬限制。理论上可以（命名空间内 CAP_SYS_RESOURCE）。
-   - Recommendation: 在 `_set_limits` 中先设置硬限制再设置软限制；集成测试验证子进程实际无法突破限制。
+1. **unshare 包装与 preexec_fn rlimit 的交互** — RESOLVED: 在 `_set_limits` 中先设置硬限制再设置软限制；集成测试验证子进程实际无法突破限制。子进程 fork 继承 rlimit，unshare 不重置。
 
-2. **`unshare --map-root-user` 是否需要 `/proc/sys/kernel/unprivileged_userns_clone`**
-   - What we know: 本机 WSL2 kernel 6.6 上没有此 sysctl 但仍可用。此参数是 Debian/Ubuntu 特有 patch。
-   - What's unclear: 其他 WSL2 发行版（如 Alpine、ArchWSL）或旧内核（5.4, 5.10）是否需要额外配置。
-   - Recommendation: 在 `_build_cmd` 中增加探测：先执行 `unshare --user --map-root-user true` 测试可用性；失败时优雅降级（跳过网络隔离，记录 warning）。
+2. **`unshare --map-root-user` 是否需要 `/proc/sys/kernel/unprivileged_userns_clone`** — RESOLVED: 在 `_build_cmd` 中增加探测：先执行 `unshare --user --map-root-user true` 测试可用性；失败时优雅降级（跳过网络隔离，记录 warning）。
 
-3. **路径白名单是否需要正则模式支持**
-   - What we know: D-03 要求"默认仅工具专用目录 + 用户确认时授予的额外目录"。
-   - What's unclear: 是否需要支持 glob/正则模式（如 `.sandbox/tools_runtime/*/data/`）。简单 `startswith` 只支持精确前缀匹配。
-   - Recommendation: Phase 9 使用精确前缀匹配（`startswith`）；如需模式匹配，在 Phase 10 工具管理面板中扩展。
+3. **路径白名单是否需要正则模式支持** — RESOLVED: Phase 9 使用精确前缀匹配（`startswith`）；如需模式匹配，在后续阶段扩展。
 
 ## Environment Availability
 
