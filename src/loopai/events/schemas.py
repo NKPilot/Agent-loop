@@ -392,6 +392,56 @@ class ToolCreationFailed(EventBase):
     error_message: str
 
 
+# ── 沙箱安全事件（Phase 9）──────────────────────────────────────────────
+
+
+class SandboxTimeout(EventBase):
+    """沙箱执行超时时发布——子进程被 SIGKILL 强制终止。
+
+    timeout_seconds 为触发 TimeoutExpired 的超时阈值（浮点秒数）。
+    """
+
+    event_type: Literal["sandbox_timeout"] = "sandbox_timeout"
+    step_num: int
+    tool_name: str
+    timeout_seconds: float
+
+
+class SandboxViolation(EventBase):
+    """沙箱违规访问时发布——越权路径、网络尝试或敏感路径访问。
+
+    violation_type 说明：
+    - path_escape: 路径白名单校验失败（尝试访问沙箱外路径）
+    - network_attempt: 尝试网络连接（被 unshare --net 阻断）
+    - sensitive_path: 尝试访问敏感系统路径（/etc, /proc, ~/.ssh 等）
+    detail 字段为人类可读的中文描述，不包含绝对文件系统和用户名信息。
+    """
+
+    event_type: Literal["sandbox_violation"] = "sandbox_violation"
+    step_num: int
+    tool_name: str
+    violation_type: Literal["path_escape", "network_attempt", "sensitive_path"]
+    detail: str
+
+
+class SandboxResourceExceeded(EventBase):
+    """沙箱资源超限时发布——内存、fork 限制或文件大小超限。
+
+    resource_type 说明：
+    - memory: RLIMIT_AS 超限
+    - process: RLIMIT_NPROC 阻止 fork
+    - file_size: RLIMIT_FSIZE 阻止大文件写入
+    limit 字段为人类可读的限制值字符串（如 "512MB", "0", "100MB"）。
+    """
+
+    event_type: Literal["sandbox_resource_exceeded"] = "sandbox_resource_exceeded"
+    step_num: int
+    tool_name: str
+    resource_type: Literal["memory", "process", "file_size"]
+    limit: str
+    detail: str
+
+
 # ── 区分联合类型 ──────────────────────────────────────────────────────
 
 Event = Annotated[
@@ -426,6 +476,9 @@ Event = Annotated[
     | ToolCreationRejected
     | ToolCreationTestResult
     | ToolCreated
-    | ToolCreationFailed,
+    | ToolCreationFailed
+    | SandboxTimeout
+    | SandboxViolation
+    | SandboxResourceExceeded,
     Field(discriminator="event_type"),
 ]

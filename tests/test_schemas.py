@@ -108,7 +108,7 @@ class TestEventDiscriminatedUnion:
 
 
 class TestAllEventsUniqueType:
-    """Verify all 22 event_type values are unique."""
+    """Verify all 25 event_type values are unique."""
 
     def test_all_events_have_unique_type(self):
         event_classes = [
@@ -134,6 +134,9 @@ class TestAllEventsUniqueType:
             CircuitClosed,
             FailureRegistered,
             EscalationRequired,
+            SandboxTimeout,
+            SandboxViolation,
+            SandboxResourceExceeded,
         ]
         # Instantiate each with minimal required fields to get event_type
         event_types = set()
@@ -222,6 +225,18 @@ class TestAllEventsUniqueType:
                 kwargs["layer"] = 4
                 kwargs["attempt_count"] = 5
                 kwargs["error_message"] = "max retries exceeded"
+            if cls is SandboxTimeout:
+                kwargs["tool_name"] = "test"
+                kwargs["timeout_seconds"] = 30.0
+            if cls is SandboxViolation:
+                kwargs["tool_name"] = "test"
+                kwargs["violation_type"] = "network_attempt"
+                kwargs["detail"] = "test detail"
+            if cls is SandboxResourceExceeded:
+                kwargs["tool_name"] = "test"
+                kwargs["resource_type"] = "memory"
+                kwargs["limit"] = "512MB"
+                kwargs["detail"] = "test detail"
 
             event = cls(**kwargs)
             event_types.add(event.event_type)
