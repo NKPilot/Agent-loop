@@ -83,6 +83,11 @@ class DynamicToolCreator:
         self._persistence = persistence
         self._pending_confirmations: dict[str, tuple[asyncio.Event, dict | None]] = {}
 
+        # D-06: 确保自测阶段的 SandboxExecutor 使用加固沙箱并发布审计事件
+        # 当外部调用者未传入 event_bus 时，自动关联 DynamicToolCreator 的 EventBus
+        if self._sandbox._event_bus is None:
+            self._sandbox._event_bus = self._bus
+
     # ── 核心方法：6 阶段管道 ────────────────────────────────────────────
 
     async def generate_tool(
@@ -452,8 +457,9 @@ class DynamicToolCreator:
         else:
             full_code = code + "\n\n# --- Self-Test ---\n" + test_code
 
-        # 创建临时工作目录
-        sandbox_dir = tempfile.mkdtemp(prefix="tool_test_")
+        # 创建临时工作目录（必须在 .sandbox 内以满足加固沙箱的路径白名单）
+        os.makedirs(".sandbox", exist_ok=True)
+        sandbox_dir = tempfile.mkdtemp(prefix="tool_test_", dir=".sandbox")
 
         try:
             test_result = await self._sandbox.execute(
@@ -595,9 +601,13 @@ class DynamicToolCreator:
 
         async def _dynamic_tool_func(**kwargs: Any) -> str:
             """动态工具的执行体——每次调用创建独立 SandboxExecutor。"""
-            sandbox = SandboxExecutor(timeout=30.0)
+            # D-06: 工具运行时沙箱独立执行，event_bus=None 表示不需审计事件
+            sandbox = SandboxExecutor(timeout=30.0, event_bus=None)
 
-            with tempfile.TemporaryDirectory(prefix="tool_run_") as tmpdir:
+            # 确保 .sandbox 目录存在（加固沙箱需要工作目录在白名单内）
+            os.makedirs(".sandbox", exist_ok=True)
+
+            with tempfile.TemporaryDirectory(prefix="tool_run_", dir=".sandbox") as tmpdir:
                 # 将 kwargs 写入参数文件，供工具代码读取
                 args_path = os.path.join(tmpdir, "args.json")
                 with open(args_path, "w", encoding="utf-8") as f:
