@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>loopAI — 文件结构图</title>
+<style>
+  :root {
+    --bg: #faf9f5;
+    --card: #ffffff;
+    --text: #2d2a24;
+    --muted: #777268;
+    --border: #e8e4db;
+    --accent: #d97706;
+    --accent-light: #fef3c7;
+    --python: #3776AB;
+    --python-bg: #EBF4FB;
+    --react: #61DAFB;
+    --react-bg: #F0FBFE;
+    --test: #16a34a;
+    --test-bg: #f0fdf4;
+    --config: #9333ea;
+    --config-bg: #faf5ff;
+    --doc: #78716c;
+    --doc-bg: #f5f4f1;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  /* Header */
+  .header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 40px 0 32px;
+    text-align: center;
+  }
+  .header h1 {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+  }
+  .header .subtitle {
+    color: var(--muted);
+    font-size: 15px;
+  }
+  .header .badge {
+    display: inline-block;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 12px;
+    margin-top: 12px;
+  }
+
+  /* Container */
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px 80px;
+  }
+
+  /* Section */
+  .section-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 40px 0 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-title .dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  }
+  .dot.root { background: var(--muted); }
+  .dot.backend { background: var(--python); }
+  .dot.frontend { background: var(--react); }
+  .dot.test { background: var(--test); }
+
+  /* Tree */
+  .tree {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 14px;
+  }
+  .tree-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: box-shadow 0.15s, border-color 0.15s;
+  }
+  .tree-card:hover {
+    border-color: #d4cfc4;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+  }
+  .tree-card-header {
+    padding: 12px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tree-card-header .icon { font-size: 16px; }
+  .tree-card-header .line-count {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--muted);
+    background: var(--bg);
+    padding: 1px 6px;
+    border-radius: 8px;
+  }
+  .tree-card-body {
+    padding: 6px 0;
+  }
+  .tree-card-body .file {
+    display: flex;
+    align-items: center;
+    padding: 3px 16px;
+    font-size: 12.5px;
+    color: var(--text);
+  }
+  .tree-card-body .file .name {
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 12px;
+  }
+  .tree-card-body .file .desc {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+    max-width: 55%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Color themes per package */
+  .py .tree-card-header { background: var(--python-bg); }
+  .py .tree-card-header .icon { color: var(--python); }
+
+  .ts .tree-card-header { background: var(--react-bg); }
+  .ts .tree-card-header .icon { color: var(--react); }
+
+  .test-card .tree-card-header { background: var(--test-bg); }
+  .test-card .tree-card-header .icon { color: var(--test); }
+
+  .cfg .tree-card-header { background: var(--config-bg); }
+  .cfg .tree-card-header .icon { color: var(--config); }
+
+  .doc-card .tree-card-header { background: var(--doc-bg); }
+  .doc-card .tree-card-header .icon { color: var(--doc); }
+
+  /* Overview diagram */
+  .overview {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  @media (max-width: 768px) { .overview { grid-template-columns: repeat(2, 1fr); } }
+  .overview-card {
+    background: var(--card);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+    border: 1px solid var(--border);
+  }
+  .overview-card .count {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -1px;
+  }
+  .overview-card .label {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* Flow diagram */
+  .flow {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px;
+    margin-bottom: 32px;
+    overflow-x: auto;
+  }
+  .flow-inner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    min-width: 700px;
+  }
+  .flow-node {
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .flow-node.user { background: var(--doc-bg); color: var(--doc); border: 1px solid var(--border); }
+  .flow-node.fsm { background: var(--accent-light); color: var(--accent); border: 1px solid var(--accent); }
+  .flow-node.bus { background: var(--config-bg); color: var(--config); border: 1px solid #c4b5fd; }
+  .flow-node.llm { background: var(--python-bg); color: var(--python); border: 1px solid #93c5fd; }
+  .flow-node.tool { background: var(--test-bg); color: var(--test); border: 1px solid #86efac; }
+  .flow-node.ui { background: var(--react-bg); color: #0ea5e9; border: 1px solid #67e8f9; }
+  .flow-arrow {
+    color: var(--muted);
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 20px;
+    color: var(--muted);
+    font-size: 12px;
+    border-top: 1px solid var(--border);
+    margin-top: 32px;
+  }
+
+  .legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .legend .l-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>loopAI</h1>
+  <p class="subtitle">ReAct AI Agent 框架 — 文件结构图</p>
+  <div class="badge">v1.1 · 动态工具系统</div>
+</div>
+
+<div class="container">
+
+  <!-- Overview -->
+  <div class="overview">
+    <div class="overview-card">
+      <div class="count" style="color:var(--python)">50</div>
+      <div class="label">Python 源文件</div>
+    </div>
+    <div class="overview-card">
+      <div class="count" style="color:var(--react)">35</div>
+      <div class="label">TypeScript 源文件</div>
+    </div>
+    <div class="overview-card">
+      <div class="count" style="color:var(--test)">326</div>
+      <div class="label">测试通过</div>
+    </div>
+    <div class="overview-card">
+      <div class="count" style="color:var(--accent)">10</div>
+      <div class="label">子包 (Python)</div>
+    </div>
+  </div>
+
+  <!-- Data flow -->
+  <div class="flow">
+    <div class="flow-inner">
+      <div class="flow-node user">用户输入</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node fsm">ReActFSM</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node llm">LLMClient</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node bus">EventBus</div>
+      <div class="flow-arrow">↗</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div class="flow-node ui" style="font-size:10px">SSE → React</div>
+        <div class="flow-node" style="background:var(--bg);font-size:10px;color:var(--muted)">JSONL 日志</div>
+        <div class="flow-node" style="background:var(--bg);font-size:10px;color:var(--muted)">CLI Rich</div>
+      </div>
+      <div class="flow-arrow" style="margin-left:4px">←</div>
+      <div class="flow-node tool">ToolExecutor</div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <span><span class="l-dot" style="background:var(--python)"></span> Python 后端</span>
+    <span><span class="l-dot" style="background:var(--react)"></span> React/TypeScript 前端</span>
+    <span><span class="l-dot" style="background:var(--test)"></span> 测试</span>
+    <span><span class="l-dot" style="background:var(--config)"></span> 配置/规划</span>
+    <span><span class="l-dot" style="background:var(--muted)"></span> 文档/根目录</span>
+  </div>
+
+  <!-- == Backend == -->
+  <div class="section-title"><span class="dot backend"></span> 后端 — src/loopai/</div>
+  <div class="tree">
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#9881;</span> state_machine / 核心循环</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">fsm.py</span><span class="desc">ReActFSM 状态机</span></div>
+        <div class="file"><span class="name">guards.py</span><span class="desc">守卫管道 (Budget/Loop/Token)</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#9889;</span> events / 事件系统</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">bus.py</span><span class="desc">EventBus — 发布/订阅</span></div>
+        <div class="file"><span class="name">schemas.py</span><span class="desc">22 种 Pydantic 事件类型</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#129302;</span> llm / LLM 客户端</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">client.py</span><span class="desc">OpenAI 流式封装</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#128736;</span> tools / 工具系统</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">types.py</span><span class="desc">ToolMetadata/ToolResult 类型</span></div>
+        <div class="file"><span class="name">decorator.py</span><span class="desc">@tool 装饰器 (auto Schema)</span></div>
+        <div class="file"><span class="name">registry.py</span><span class="desc">ToolRegistry 分区注册</span></div>
+        <div class="file"><span class="name">executor.py</span><span class="desc">4 层恢复管道</span></div>
+        <div class="file"><span class="name">bash.py</span><span class="desc">BashTool — 安全 subprocess</span></div>
+        <div class="file"><span class="name">command_classifier.py</span><span class="desc">命令白名单/黑名单</span></div>
+        <div class="file"><span class="name">disk_tools.py</span><span class="desc">df/du/find/rm 磁盘工具</span></div>
+        <div class="file"><span class="name">sandbox.py</span><span class="desc">沙箱扫描器 + 执行器</span></div>
+        <div class="file"><span class="name">dynamic_creator.py</span><span class="desc">6 阶段动态工具创建</span></div>
+        <div class="file"><span class="name">tool_persistence.py</span><span class="desc">三级持久化管理</span></div>
+        <div class="file"><span class="name">prompt_builder.py</span><span class="desc">system prompt 生成</span></div>
+        <div class="file"><span class="name">errors.py</span><span class="desc">错误分类体系</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#128190;</span> session / 会话管理</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">context.py</span><span class="desc">Session + AgentState 枚举</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#128202;</span> context / 上下文管理</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">token_counter.py</span><span class="desc">TokenCounter (tiktoken)</span></div>
+        <div class="file"><span class="name">compressor.py</span><span class="desc">滑动窗口 + LLM 摘要</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#128274;</span> resilience / 韧性与恢复</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">checkpoint.py</span><span class="desc">JSONL 检查点</span></div>
+        <div class="file"><span class="name">circuit_breaker.py</span><span class="desc">熔断器</span></div>
+        <div class="file"><span class="name">failure_registry.py</span><span class="desc">失败操作注册表</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#129309;</span> agents / 多 Agent</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">types.py</span><span class="desc">AgentMetadata 类型</span></div>
+        <div class="file"><span class="name">registry.py</span><span class="desc">AgentRegistry</span></div>
+        <div class="file"><span class="name">decorator.py</span><span class="desc">@agent 装饰器</span></div>
+        <div class="file"><span class="name">tool.py</span><span class="desc">AgentTool 桥接</span></div>
+        <div class="file"><span class="name">disk_agents.py</span><span class="desc">disk_analyzer/cleaner</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#127760;</span> api / Web API</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">app.py</span><span class="desc">FastAPI 工厂 + CORS</span></div>
+        <div class="file"><span class="name">schemas.py</span><span class="desc">REST 请求/响应模型</span></div>
+        <div class="file"><span class="name">sse_bridge.py</span><span class="desc">SSE 事件流桥接</span></div>
+        <div class="file"><span class="name">routes/sessions.py</span><span class="desc">会话 CRUD</span></div>
+        <div class="file"><span class="name">routes/control.py</span><span class="desc">Agent 控制端点</span></div>
+        <div class="file"><span class="name">routes/stream.py</span><span class="desc">SSE 流端点</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#128250;</span> consumers / 事件消费者</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">cli_renderer.py</span><span class="desc">Rich 终端渲染</span></div>
+        <div class="file"><span class="name">jsonl_logger.py</span><span class="desc">JSONL 文件持久化</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card py">
+      <div class="tree-card-header"><span class="icon">&#128218;</span> 根模块</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">main.py</span><span class="desc">CLI 入口 + create_agent_components()</span></div>
+        <div class="file"><span class="name">config.py</span><span class="desc">AgentConfig 加载</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- == Frontend == -->
+  <div class="section-title"><span class="dot frontend"></span> 前端 — frontend/src/</div>
+  <div class="tree">
+
+    <div class="tree-card ts">
+      <div class="tree-card-header"><span class="icon">&#127968;</span> 入口</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">main.tsx</span><span class="desc">React 入口 + Query Provider</span></div>
+        <div class="file"><span class="name">App.tsx</span><span class="desc">主应用 (启动页/消息流/侧栏)</span></div>
+        <div class="file"><span class="name">index.css</span><span class="desc">Tailwind + 基础样式</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card ts">
+      <div class="tree-card-header"><span class="icon">&#128450;</span> components / 业务组件</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">StepCard.tsx</span><span class="desc">Agent 步骤卡片</span></div>
+        <div class="file"><span class="name">AgentTimeline.tsx</span><span class="desc">时间线视图</span></div>
+        <div class="file"><span class="name">SessionList.tsx</span><span class="desc">会话历史侧边栏</span></div>
+        <div class="file"><span class="name">ConfirmationDialog.tsx</span><span class="desc">危险命令确认</span></div>
+        <div class="file"><span class="name">ToolCreationDialog.tsx</span><span class="desc">动态工具创建确认</span></div>
+        <div class="file"><span class="name">ToolDetail.tsx</span><span class="desc">工具调用详情</span></div>
+        <div class="file"><span class="name">TokenUsageCard.tsx</span><span class="desc">Token/成本图表</span></div>
+        <div class="file"><span class="name">AgentCallCard.tsx</span><span class="desc">子 Agent 调用卡片</span></div>
+        <div class="file"><span class="name">ConnectionStatus.tsx</span><span class="desc">SSE 连接状态</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card ts">
+      <div class="tree-card-header"><span class="icon">&#127912;</span> components/ui / shadcn</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">badge, button, card</span><span class="desc">基础组件</span></div>
+        <div class="file"><span class="name">dialog, input, label</span><span class="desc">表单/弹窗</span></div>
+        <div class="file"><span class="name">tabs, progress, skeleton</span><span class="desc">布局/状态</span></div>
+        <div class="file"><span class="name">scroll-area, separator</span><span class="desc">容器</span></div>
+        <div class="file"><span class="name">tooltip, dropdown-menu</span><span class="desc">浮层</span></div>
+        <div class="file"><span class="name">alert, radio-group</span><span class="desc">交互</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card ts">
+      <div class="tree-card-header"><span class="icon">&#129526;</span> hooks / React Hooks</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">useSSE.ts</span><span class="desc">SSE 连接 + 退避重连</span></div>
+        <div class="file"><span class="name">useSessionEvents.ts</span><span class="desc">SSE → Zustand 桥接</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card ts">
+      <div class="tree-card-header"><span class="icon">&#128230;</span> stores / 状态管理</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">eventStore.ts</span><span class="desc">事件按会话/轮次分组</span></div>
+        <div class="file"><span class="name">uiStore.ts</span><span class="desc">UI 状态 + 确认弹窗</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card ts">
+      <div class="tree-card-header"><span class="icon">&#128295;</span> lib / 工具库</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">api.ts</span><span class="desc">REST API 客户端</span></div>
+        <div class="file"><span class="name">eventTypes.ts</span><span class="desc">TypeScript 事件类型</span></div>
+        <div class="file"><span class="name">costCalculator.ts</span><span class="desc">Token 成本估算</span></div>
+        <div class="file"><span class="name">utils.ts</span><span class="desc">cn() / formatMs()</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- == Tests == -->
+  <div class="section-title"><span class="dot test"></span> 测试 — tests/</div>
+  <div class="tree">
+    <div class="tree-card test-card">
+      <div class="tree-card-header"><span class="icon">&#128269;</span> 核心测试</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">test_fsm.py</span><span class="desc">ReActFSM 状态机</span></div>
+        <div class="file"><span class="name">test_tools.py</span><span class="desc">@tool / Registry / Executor</span></div>
+        <div class="file"><span class="name">test_guards.py</span><span class="desc">守卫管道</span></div>
+        <div class="file"><span class="name">test_schemas.py</span><span class="desc">事件 Schema 验证</span></div>
+        <div class="file"><span class="name">test_event_bus.py</span><span class="desc">EventBus 发布/订阅</span></div>
+        <div class="file"><span class="name">test_bash_tool.py</span><span class="desc">BashTool 安全</span></div>
+        <div class="file"><span class="name">test_llm_client.py</span><span class="desc">LLM 客户端</span></div>
+        <div class="file"><span class="name">test_disk_cleanup.py</span><span class="desc">磁盘清理 E2E</span></div>
+        <div class="file"><span class="name">test_agents.py</span><span class="desc">AgentTool 多 Agent</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card test-card">
+      <div class="tree-card-header"><span class="icon">&#128737;</span> 工具专项测试</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">tools/test_sandbox.py</span><span class="desc">SandboxExecutor 加固</span></div>
+        <div class="file"><span class="name">tools/test_dynamic_creator_sandbox.py</span><span class="desc">D-06 集成</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card test-card">
+      <div class="tree-card-header"><span class="icon">&#127758;</span> API 测试</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">api/test_integration.py</span><span class="desc">端到端 API 集成</span></div>
+        <div class="file"><span class="name">api/test_control.py</span><span class="desc">会话控制端点</span></div>
+        <div class="file"><span class="name">api/test_sessions.py</span><span class="desc">会话 CRUD</span></div>
+        <div class="file"><span class="name">api/test_sse.py</span><span class="desc">SSE 流端点</span></div>
+      </div>
+    </div>
+
+    <div class="tree-card test-card">
+      <div class="tree-card-header"><span class="icon">&#128230;</span> 基础设施测试</div>
+      <div class="tree-card-body">
+        <div class="file"><span class="name">test_token_counter.py</span><span class="desc">Token 计数</span></div>
+        <div class="file"><span class="name">test_context_compressor.py</span><span class="desc">上下文压缩</span></div>
+        <div class="file"><span class="name">test_checkpoint.py</span><span class="desc">检查点</span></div>
+        <div class="file"><span class="name">test_circuit_breaker.py</span><span class="desc">熔断器</span></div>
+        <div class="file"><span class="name">test_failure_registry.py</span><span class="desc">失败注册表</span></div>
+        <div class="file"><span class="name">test_cli_renderer.py</span><span class="desc">CLI 渲染</span></div>
+        <div class="file"><span class="name">test_jsonl_logger.py</span><span class="desc">JSONL 日志</span></div>
+        <div class="file"><span class="name">test_config.py</span><span class="desc">配置管理</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  loopAI v1.1 · 50 Python files · 35 TypeScript files · 326 tests passing · Generated 2026-05-31
+</div>
+
+</body>
+</html>
