@@ -172,8 +172,11 @@
   2. 子进程受 `resource.setrlimit` 硬限制：CPU 时间、内存上限 512MB、超时 30s（可调至 120s），超限进程被 SIGKILL 强制终止
   3. 子进程无法访问网络，尝试网络连接的操作被阻止并返回明确错误信息
   4. 文件系统访问默认限于 `.sandbox/tools_runtime/{tool_name}/` 子目录，无法读取或写入沙箱外路径；用户可在确认时授予额外目录权限
-**计划**: TBD
-**Plans**: TBD
+**计划**: 3 plans
+**Plans**:
+- [ ] 09-01-PLAN.md — 事件 Schema 契约：新增 sandbox_timeout/sandbox_violation/sandbox_resource_exceeded 事件类型（Python + TypeScript 同步）
+- [ ] 09-02-PLAN.md — SandboxExecutor 三层加固：unshare 网络隔离 + 路径白名单校验 + rlimit 升级（DYN-11~DYN-14）
+- [ ] 09-03-PLAN.md — DynamicToolCreator 集成：加固沙箱替换自测执行器 + D-06 闭合
 
 ### 阶段 10: 用户体验与工具管理
 **目标**: 用户可通过前端"动态工具"面板集中管理所有动态工具——查看代码、启用/禁用、删除、diff 更新对比、命名冲突处理。工具发现系统确保 Agent 始终知晓可用动态工具
@@ -219,6 +222,6 @@
 | 6. Agent-as-Tool | 3/3 | 完成 | 2026-05-30 |
 | 7. Chat 模式 | 0/2 | 进行中 | - |
 | 8. 动态工具创建核心 (MVP) | 0/0 | 未开始 | - |
-| 9. 安全加固与沙箱隔离 | 0/0 | 未开始 | - |
+| 9. 安全加固与沙箱隔离 | 0/3 | 未开始 | - |
 | 10. 用户体验与工具管理 | 0/0 | 未开始 | - |
 | 11. 集成验证与优化 | 0/0 | 未开始 | - |
