@@ -43,13 +43,20 @@ export function useSessionEvents(sessionId: string | null): { status: SSEStatus 
         useUIStore.getState().setPendingToolCreation(data);
       }
 
-      // Handle tool creation test result — update UI store
+      // Handle tool creation test result
       if (eventType === "tool_creation_test_result" && data.event_type === "tool_creation_test_result") {
         useUIStore.getState().setToolCreationTestResult(data);
+        // Auto-close dialog on failure — agent will retry with fixed code
+        if (data.status === "failed") {
+          setTimeout(() => {
+            useUIStore.getState().clearPendingToolCreation();
+          }, 3000);
+        }
       }
 
-      // Handle tool created — clear pending and close dialog
-      if (eventType === "tool_created" && data.event_type === "tool_created") {
+      // Handle tool created/updated — clear pending and close dialog
+      if ((eventType === "tool_created" && data.event_type === "tool_created") ||
+          (eventType === "tool_updated" && data.event_type === "tool_updated")) {
         useUIStore.getState().clearPendingToolCreation();
       }
     },

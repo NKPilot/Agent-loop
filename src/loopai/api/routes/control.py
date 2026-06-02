@@ -187,6 +187,17 @@ async def start_session(body: StartSessionRequest, request: Request):
     app_state = request.app.state
     app_state.session_queues[session.session_id] = asyncio.Queue()
 
+    # 发布 user_message 事件供 SSE 推流（首条消息）
+    await bus.publish(
+        "user_message",
+        {
+            "event_type": "user_message",
+            "session_id": session.session_id,
+            "round_num": 1,
+            "content": body.prompt,
+        },
+    )
+
     # 启动 JSONL 日志记录器（Web 路径下唯一需要的消费者）
     logger_task = await logger_obj.start(bus)
 
@@ -312,12 +323,14 @@ async def confirm_tool_creation(
             detail=f"No dynamic tool creator for session '{session_id}'",
         )
 
-    # 验证 confirmation_id 是否为待处理状态
+    # 验证 confirmation_id — 若已被消费则幂等返回成功
     if body.confirmation_id not in dynamic_creator._pending_confirmations:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Confirmation '{body.confirmation_id}' not found or already responded",
-        )
+        return {
+            "confirmation_id": body.confirmation_id,
+            "approved": body.approved,
+            "responded": True,
+            "already_processed": True,
+        }
 
     # 构造配置 dict 传给 DynamicToolCreator
     config = {

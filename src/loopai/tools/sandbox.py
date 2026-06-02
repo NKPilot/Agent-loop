@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ast
 import logging
 import os
@@ -36,6 +37,10 @@ if TYPE_CHECKING:
 __all__ = ["DangerousModuleScanner", "SandboxExecutor"]
 
 logger = logging.getLogger(__name__)
+
+# ── unshare 可用性缓存（避免重复同步检测） ──────────────────────────────
+
+_unshare_available: bool | None = None
 
 # ── 模块级常量 ──────────────────────────────────────────────────────────
 
@@ -467,8 +472,9 @@ class SandboxExecutor:
             if sys.platform != "win32":
                 preexec_fn = self._set_limits
 
-            # 执行子进程
-            result = subprocess.run(
+            # 执行子进程（使用线程池避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                subprocess.run,
                 cmd,
                 cwd=working_dir,
                 timeout=self.timeout,
@@ -572,6 +578,8 @@ class SandboxExecutor:
         创建无网络命名空间以阻断所有网络连接。非 Linux 平台优雅降级为
         仅基础命令（仅 rlimit 保护）。
 
+        unshare 可用性在模块级缓存（首次检测后复用）。
+
         决策引用:
             DYN-13: 网络命名空间隔离
             RESEARCH Pattern 1: unshare CLI Wrapper
@@ -583,6 +591,8 @@ class SandboxExecutor:
         Returns:
             命令列表（可直接传递给 subprocess.run）。
         """
+        global _unshare_available
+
         # 基础命令
         if language == "python":
             base_cmd = [sys.executable, script_path]
@@ -593,24 +603,27 @@ class SandboxExecutor:
         if sys.platform != "linux":
             return base_cmd
 
-        # 验证 unshare 可用性
-        try:
-            subprocess.run(
-                ["unshare", "--user", "--map-root-user", "true"],
-                timeout=5,
-                capture_output=True,
-                shell=False,
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-            logger.warning(
-                "unshare 不可用 (%s)，降级为无网络隔离模式。"
-                "需要 util-linux 2.32+ 以使用 --map-root-user。",
-                e,
-            )
-            return base_cmd
+        # 使用缓存的 unshare 可用性结果
+        if _unshare_available is None:
+            try:
+                subprocess.run(
+                    ["unshare", "--user", "--map-root-user", "true"],
+                    timeout=5,
+                    capture_output=True,
+                    shell=False,
+                )
+                _unshare_available = True
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+                logger.warning(
+                    "unshare 不可用 (%s)，降级为无网络隔离模式。"
+                    "需要 util-linux 2.32+ 以使用 --map-root-user。",
+                    e,
+                )
+                _unshare_available = False
 
-        # Linux: 使用 unshare 包装
-        return ["unshare", "--user", "--map-root-user", "--net"] + base_cmd
+        if _unshare_available:
+            return ["unshare", "--user", "--map-root-user", "--net"] + base_cmd
+        return base_cmd
 
     # ── 路径安全（DYN-14：路径白名单） ───────────────────────────────
 

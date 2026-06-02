@@ -48,6 +48,7 @@ export interface UIState {
   setMessageInput: (text: string) => void;
   setPendingSessionStart: (v: boolean) => void;
   setToolPanelOpen: (open: boolean) => void;
+}
 
 // ── Store ─────────────────────────────────────────────────────────────
 

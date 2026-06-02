@@ -120,10 +120,14 @@ class DynamicToolCreator:
         if stage0_result is not None:
             return stage0_result
 
-        tool_id = f"dynamic.{hashlib.sha256(code.encode()).hexdigest()[:8]}_{name}"
+        tool_id = f"dynamic-{hashlib.sha256(code.encode()).hexdigest()[:8]}-{name}"
 
-        # D-08/DYN-17: 检测是否为已有工具的更新版本
-        existing_meta = self._registry.get(tool_id)
+        # D-08/DYN-17: 检测是否为已有工具的更新版本（按 name 匹配，而非 tool_id）
+        existing_meta = None
+        for meta in self._registry.list_dynamic():
+            if meta.name.endswith(f"-{name}"):
+                existing_meta = meta
+                break
         is_update = existing_meta is not None
         old_code = existing_meta.code if existing_meta else ""
 
@@ -562,13 +566,18 @@ class DynamicToolCreator:
 
         # 注册到内存（D-06: 确认后立即注册）
         if is_update:
-            # D-08/DYN-17: 更新已有工具——原地更新，不重新注册
-            existing = self._registry.get(tool_id)
-            if existing:
-                existing.code = code
-                existing.description = description
-                existing.param_schema = param_schema
-                existing.func_ref = self._make_func_ref(tool_id, code, language, config)
+            # D-08/DYN-17: 更新已有工具——按 name 后缀查找并原地更新
+            updated = None
+            for m in self._registry.list_dynamic():
+                if m.name.endswith(f"-{name}"):
+                    updated = m
+                    break
+            if updated:
+                updated.code = code
+                updated.description = description
+                updated.param_schema = param_schema
+                updated.func_ref = self._make_func_ref(tool_id, code, language, config)
+                updated.name = tool_id  # 代码变了 hash 也变，更新名称
                 # 不修改 tags（保留持久化级别等信息 per D-09/T-10-06）
         else:
             try:
@@ -586,7 +595,7 @@ class DynamicToolCreator:
                     "param_schema": param_schema,
                     "persistence": persistence_level,
                 }
-                self._persistence.save(name, code, language, persistence_level, meta_dict)
+                self._persistence.save(tool_id, code, language, persistence_level, meta_dict)
             except Exception:
                 # 持久化失败不阻塞——工具已注册到内存
                 pass
@@ -644,6 +653,10 @@ class DynamicToolCreator:
                         "with open(_args_file, 'r', encoding='utf-8') as _f:\n"
                         "    _tool_args = json.load(_f)\n"
                         f"{code}\n"
+                        "if 'main' in dir():\n"
+                        "    _result = main(_tool_args)\n"
+                        "    if _result is not None:\n"
+                        "        print(_result)\n"
                     )
                 else:
                     wrapper = (

@@ -363,9 +363,9 @@ function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <div className="flex h-screen flex-col bg-background text-foreground overflow-hidden">
         {/* Header */}
-        <header className="flex h-14 items-center justify-between border-b border-border px-4">
+        <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-border px-4 bg-background">
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-semibold">loopAI</h1>
             <Button

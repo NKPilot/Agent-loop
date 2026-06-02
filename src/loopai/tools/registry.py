@@ -98,9 +98,9 @@ class ToolRegistry:
 
         if is_dynamic:
             # 动态工具强制 dynamic. 前缀（T-08-05）
-            if not meta.name.startswith("dynamic."):
+            if not meta.name.startswith("dynamic-"):
                 raise ValueError(
-                    f"动态工具名称必须以 'dynamic.' 开头，"
+                    f"动态工具名称必须以 'dynamic-' 开头，"
                     f"当前名称为 '{meta.name}'"
                 )
             self._dynamic_tools[meta.name] = meta

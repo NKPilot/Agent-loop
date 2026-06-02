@@ -150,7 +150,7 @@ class CircuitBreaker:
                             },
                         )
 
-        elif state == CircuitState.CLOSED and rate > self.failure_threshold:
+        elif state == CircuitState.CLOSED and rate > self.failure_threshold and len(window) >= max(3, self.window_size // 2):
             previous = CircuitState.CLOSED.value
             self._state[tool_name] = CircuitState.OPEN
             self._opened_at[tool_name] = time.monotonic()

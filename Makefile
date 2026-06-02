@@ -30,7 +30,7 @@ start:
 		> /tmp/loopai-backend.log 2>&1 & echo $$! > $(PID_DIR)/backend.pid
 	@echo "  后端 PID: $$(cat $(PID_DIR)/backend.pid)"
 	@echo "启动前端..."
-	@cd frontend && nohup pnpm dev > /tmp/loopai-frontend.log 2>&1 & echo $$! > ../../$(PID_DIR)/frontend.pid
+	@cd frontend && nohup pnpm dev > /tmp/loopai-frontend.log 2>&1 & echo $$! > ../$(PID_DIR)/frontend.pid
 	@echo "  前端 PID: $$(cat $(PID_DIR)/frontend.pid)"
 	@echo "日志: /tmp/loopai-backend.log /tmp/loopai-frontend.log"
 
