@@ -144,6 +144,11 @@ def create_agent_components(
     generate_tool_fn = create_generate_tool_fn(dynamic_creator)
     registry.register(generate_tool_fn)
 
+    # 注册 list_tools 内置工具（DYN-23）
+    from loopai.tools.dynamic_creator import create_list_tools_fn
+    list_tools_fn = create_list_tools_fn(registry)
+    registry.register(list_tools_fn)
+
     # ── 构建系统提示（现在包含 generate_tool）──────────────────────
     from loopai.tools.prompt_builder import build_system_prompt
     system_prompt = build_system_prompt(registry, working_dir=config.tool_working_dir)

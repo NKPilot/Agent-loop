@@ -53,12 +53,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # API 路由 — stream、sessions 和 control 路由器
-    from loopai.api.routes import control, sessions, stream  # noqa: E402
+    # API 路由 — stream、sessions、control 和 tools 路由器
+    from loopai.api.routes import control, sessions, stream, tools  # noqa: E402
 
     app.include_router(stream.router, prefix="/api")
     app.include_router(sessions.router, prefix="/api")
     app.include_router(control.router, prefix="/api")
+    app.include_router(tools.router, prefix="/api")
 
     # 静态文件：提供前端生产构建产物（通过 html=True 实现 SPA 回退）。
     # 必须在 API 路由之后挂载，以确保 /api/* 路径优先匹配。

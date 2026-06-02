@@ -74,7 +74,7 @@
   5. 系统启动时自动扫描并加载所有持久化动态工具，工具名和描述注入 system prompt；Agent 可通过 `list_tools` 内置工具查询所有动态工具的详细信息（含完整 Schema）
 **计划**: 3 plans
 **Plans**:
-- [ ] 10-01-PLAN.md — 后端核心：ToolMetadata.enabled + Registry 过滤 + meta.json 持久化 + 事件类型 + 启动加载
+- [x] 10-01-PLAN.md — 后端核心：ToolMetadata.enabled + Registry 过滤 + meta.json 持久化 + 事件类型 + 启动加载
 - [ ] 10-02-PLAN.md — 后端 API：工具管理 REST 端点 + DynamicToolCreator 更新检测 + list_tools 内置工具
 - [ ] 10-03-PLAN.md — 前端 UI：ToolManagementPanel 侧边栏 + ToolCreationDialog 更新模式（DiffEditor）
 **UI hint**: yes

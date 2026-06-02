@@ -105,6 +105,54 @@ class ConfirmToolCreationRequest(BaseModel):
     extra_dirs: list[str] = []
 
 
+# ── 工具管理 API Schema（Phase 10）────────────────────────────────────
+
+
+class ToolSummary(BaseModel):
+    """工具列表端点的轻量级工具摘要。"""
+
+    tool_name: str
+    description: str
+    language: str
+    persistence: str
+    enabled: bool
+    is_dynamic: bool = True
+
+
+class ToolListResponse(BaseModel):
+    """GET /api/tools 的响应模型。"""
+
+    tools: list[ToolSummary]
+
+
+class ToolDetailResponse(BaseModel):
+    """GET /api/tools/{tool_name} 的响应模型。"""
+
+    tool_name: str
+    description: str
+    language: str
+    code: str
+    param_schema: dict
+    persistence: str
+    enabled: bool
+    tags: list[str]
+    created_at: str = ""
+
+
+class ToolActionResponse(BaseModel):
+    """工具管理操作（disable/enable/delete）的响应模型。"""
+
+    tool_name: str
+    action: str
+    success: bool
+
+
+class ToolDeleteRequest(BaseModel):
+    """POST /api/tools/{tool_name}/delete 的请求体。"""
+
+    confirmation: bool
+
+
 __all__ = [
     "SessionSummary",
     "SessionListResponse",
@@ -116,4 +164,9 @@ __all__ = [
     "SendMessageRequest",
     "SendMessageResponse",
     "ConfirmToolCreationRequest",
+    "ToolSummary",
+    "ToolListResponse",
+    "ToolDetailResponse",
+    "ToolActionResponse",
+    "ToolDeleteRequest",
 ]
