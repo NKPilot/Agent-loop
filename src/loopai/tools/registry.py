@@ -221,7 +221,7 @@ class ToolRegistry:
             }
         """
         static_tools = list(self._static_tools.values())
-        dynamic_tools = list(self._dynamic_tools.values())
+        dynamic_tools = [m for m in self._dynamic_tools.values() if m.enabled]
         tools = static_tools + dynamic_tools
         if exclude_open:
             tools = [m for m in tools if m.name not in exclude_open]

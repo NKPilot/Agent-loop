@@ -201,6 +201,8 @@ class ToolMetadata(BaseModel):
         tags: 用于分类和发现的任意字符串标签。
         param_schema: 工具参数的 JSON Schema（从类型提示生成）。
         is_dynamic: 是否为 Agent 动态创建的工具（默认 False，确保向后兼容）。
+        enabled: 工具是否启用（禁用工具不暴露给 LLM，默认 True）。
+        code: 工具的源代码（动态工具存储代码以供管理面板查看）。
         func_ref: 可调用对象的引用（排除在序列化之外）。
     """
 
@@ -212,6 +214,8 @@ class ToolMetadata(BaseModel):
     tags: list[str] = []
     param_schema: dict = {}
     is_dynamic: bool = False
+    enabled: bool = True
+    code: str = ""
     func_ref: Any = Field(default=None, exclude=True)
     validation_model: Any = Field(default=None, exclude=True)
 
