@@ -333,6 +333,7 @@ class ToolPersistenceManager:
                 "created_at", datetime.now(timezone.utc).isoformat()
             ),
             "persistence": persistence,
+            "enabled": extra.get("enabled", True),
         }
 
     @staticmethod

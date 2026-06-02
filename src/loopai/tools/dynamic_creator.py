@@ -575,45 +575,30 @@ class DynamicToolCreator:
 
     # ── func_ref 构造（Pitfall 3 防护）──────────────────────────────────
 
-    def _make_func_ref(
-        self,
-        tool_id: str,
-        code: str,
-        language: str,
-        config: dict,
-    ) -> Callable:
-        """构造动态工具的可调用对象（func_ref）。
+    @staticmethod
+    def build_func_ref(code: str, language: str) -> Callable:
+        """构造动态工具的可调用对象（func_ref），独立于 DynamicToolCreator 实例。
 
-        func_ref 是独立的 async 函数，不捕获 self/Session 引用
-        （Pitfall 3 防护）。Phase 8 基础版本：内部创建临时
-        SandboxExecutor 实例执行。
+        此静态方法供启动加载（create_agent_components）用于从持久化代码重建 func_ref。
+        与 _make_func_ref 行为一致，但不捕获 tool_id 和 config。
 
         Args:
-            tool_id: 工具完整 ID（如 dynamic.a1b2c3d4_disk_check）。
             code: 工具源代码。
-            language: 代码语言。
-            config: 用户确认配置。
+            language: 代码语言（``"python"`` 或 ``"bash"``）。
 
         Returns:
             async 函数，接受 **kwargs，返回 str（子进程 stdout）。
         """
-        # 闭包仅捕获不可变的值类型（str），不捕获 self 或可变对象
 
         async def _dynamic_tool_func(**kwargs: Any) -> str:
             """动态工具的执行体——每次调用创建独立 SandboxExecutor。"""
-            # D-06: 工具运行时沙箱独立执行，event_bus=None 表示不需审计事件
             sandbox = SandboxExecutor(timeout=30.0, event_bus=None)
-
-            # 确保 .sandbox 目录存在（加固沙箱需要工作目录在白名单内）
             os.makedirs(".sandbox", exist_ok=True)
-
             with tempfile.TemporaryDirectory(prefix="tool_run_", dir=".sandbox") as tmpdir:
-                # 将 kwargs 写入参数文件，供工具代码读取
                 args_path = os.path.join(tmpdir, "args.json")
                 with open(args_path, "w", encoding="utf-8") as f:
                     json.dump(kwargs, f, ensure_ascii=False)
 
-                # 构建包装脚本：加载参数后执行原始工具代码
                 if language == "python":
                     wrapper = (
                         "# -*- coding: utf-8 -*-\n"
@@ -625,7 +610,6 @@ class DynamicToolCreator:
                         f"{code}\n"
                     )
                 else:
-                    # Bash: 设置环境变量，导出参数 JSON 路径
                     wrapper = (
                         f'export TOOL_ARGS_FILE="{args_path}"\n'
                         f'export TOOL_RUN_DIR="{tmpdir}"\n'
@@ -642,6 +626,33 @@ class DynamicToolCreator:
                     return f"[工具执行失败] {error_msg}"
 
         return _dynamic_tool_func
+
+    def _make_func_ref(
+        self,
+        tool_id: str,
+        code: str,
+        language: str,
+        config: dict,
+    ) -> Callable:
+        """构造动态工具的可调用对象（func_ref）。
+
+        func_ref 是独立的 async 函数，不捕获 self/Session 引用
+        （Pitfall 3 防护）。Phase 8 基础版本：内部创建临时
+        SandboxExecutor 实例执行。
+
+        委托给 build_func_ref 静态方法，保留 tool_id 和 config 参数
+        以保证向后兼容。
+
+        Args:
+            tool_id: 工具完整 ID（如 dynamic.a1b2c3d4_disk_check）。
+            code: 工具源代码。
+            language: 代码语言。
+            config: 用户确认配置。
+
+        Returns:
+            async 函数，接受 **kwargs，返回 str（子进程 stdout）。
+        """
+        return self.build_func_ref(code, language)
 
 
 # ── generate_tool 内置工具工厂函数 ─────────────────────────────────────
