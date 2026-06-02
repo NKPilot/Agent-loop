@@ -186,17 +186,20 @@ export async function fetchToolDetail(toolName: string): Promise<ToolDetail> {
 }
 
 export async function disableTool(toolName: string): Promise<void> {
-  await fetch(`/api/tools/${encodeURIComponent(toolName)}/disable`, { method: "POST" });
+  const response = await fetch(`/api/tools/${encodeURIComponent(toolName)}/disable`, { method: "POST" });
+  return handleResponse<void>(response);
 }
 
 export async function enableTool(toolName: string): Promise<void> {
-  await fetch(`/api/tools/${encodeURIComponent(toolName)}/enable`, { method: "POST" });
+  const response = await fetch(`/api/tools/${encodeURIComponent(toolName)}/enable`, { method: "POST" });
+  return handleResponse<void>(response);
 }
 
 export async function deleteTool(toolName: string): Promise<void> {
-  await fetch(`/api/tools/${encodeURIComponent(toolName)}/delete`, {
+  const response = await fetch(`/api/tools/${encodeURIComponent(toolName)}/delete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ confirmation: true }),
   });
+  return handleResponse<void>(response);
 }
