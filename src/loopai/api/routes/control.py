@@ -322,7 +322,7 @@ async def confirm_tool_creation(
     # 构造配置 dict 传给 DynamicToolCreator
     config = {
         "approved": body.approved,
-        "persistence_level": body.persistence,
+        "persistence": body.persistence,
         "extra_dirs": body.extra_dirs,
     }
     dynamic_creator.respond(body.confirmation_id, body.approved, config)
