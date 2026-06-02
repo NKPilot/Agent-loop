@@ -75,6 +75,6 @@
 **计划**: 3 plans
 **Plans**:
 - [x] 10-01-PLAN.md — 后端核心：ToolMetadata.enabled + Registry 过滤 + meta.json 持久化 + 事件类型 + 启动加载
-- [ ] 10-02-PLAN.md — 后端 API：工具管理 REST 端点 + DynamicToolCreator 更新检测 + list_tools 内置工具
+- [x] 10-02-PLAN.md — 后端 API：工具管理 REST 端点 + DynamicToolCreator 更新检测 + list_tools 内置工具
 - [ ] 10-03-PLAN.md — 前端 UI：ToolManagementPanel 侧边栏 + ToolCreationDialog 更新模式（DiffEditor）
 **UI hint**: yes
