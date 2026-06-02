@@ -276,6 +276,7 @@ export interface ToolCreatedEvent extends EventBase {
   tool_name: string;
   tool_id: string;
   persistence: "session" | "sandbox" | "project";
+  is_update: boolean;
 }
 
 export interface ToolCreationFailedEvent extends EventBase {
@@ -309,6 +310,7 @@ export interface ToolUpdatedEvent extends EventBase {
   tool_name: string;
   tool_id: string;
   old_tool_name: string;
+  is_update: boolean;
 }
 
 // ── Sandbox security events (Phase 9) ────────────────────────────────────

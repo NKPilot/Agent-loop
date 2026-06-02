@@ -378,6 +378,7 @@ class ToolCreated(EventBase):
     tool_name: str
     tool_id: str
     persistence: Literal["session", "sandbox", "project"]
+    is_update: bool = False
 
 
 class ToolCreationFailed(EventBase):
@@ -475,6 +476,7 @@ class ToolUpdated(EventBase):
     tool_name: str
     tool_id: str
     old_tool_name: str
+    is_update: bool = False
 
 
 # ── 区分联合类型 ──────────────────────────────────────────────────────
