@@ -593,7 +593,7 @@ class DynamicToolCreator:
 
         # 发布工具创建或更新事件
         event_name = "tool_updated" if is_update else "tool_created"
-        await self._bus.publish(event_name, {
+        event_payload = {
             "event_type": event_name,
             "session_id": self._session_id,
             "step_num": 0,
@@ -602,7 +602,10 @@ class DynamicToolCreator:
             "persistence": persistence_level,
             "is_update": is_update,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        }
+        if is_update:
+            event_payload["old_tool_name"] = name
+        await self._bus.publish(event_name, event_payload)
 
         return None
 
