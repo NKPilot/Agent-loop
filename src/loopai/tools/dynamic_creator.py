@@ -536,6 +536,8 @@ class DynamicToolCreator:
             param_schema=param_schema,
             func_ref=self._make_func_ref(tool_id, code, language, config),
             is_dynamic=True,
+            enabled=True,
+            code=code,
             tags=tags,
         )
 

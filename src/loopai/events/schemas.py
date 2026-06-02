@@ -330,6 +330,7 @@ class ToolCreationRequested(EventBase):
     risk_flags: list[dict]
     test_code: str
     param_schema: dict
+    is_update: bool = False
 
 
 class ToolCreationConfirmed(EventBase):
@@ -442,6 +443,40 @@ class SandboxResourceExceeded(EventBase):
     detail: str
 
 
+# ── 工具管理事件（Phase 10）───────────────────────────────────────────────
+
+
+class ToolDisabled(EventBase):
+    """工具被禁用时发布——该工具不再出现在 LLM 的 get_schemas() 中。"""
+
+    event_type: Literal["tool_disabled"] = "tool_disabled"
+    tool_name: str
+
+
+class ToolEnabled(EventBase):
+    """工具被重新启用时发布——该工具恢复出现在 get_schemas() 中。"""
+
+    event_type: Literal["tool_enabled"] = "tool_enabled"
+    tool_name: str
+
+
+class ToolDeleted(EventBase):
+    """工具被删除时发布——工具从注册表和持久化存储中移除。"""
+
+    event_type: Literal["tool_deleted"] = "tool_deleted"
+    tool_name: str
+    persistence: str
+
+
+class ToolUpdated(EventBase):
+    """工具被更新时发布——Agent 提交新代码替换已有工具。"""
+
+    event_type: Literal["tool_updated"] = "tool_updated"
+    tool_name: str
+    tool_id: str
+    old_tool_name: str
+
+
 # ── 区分联合类型 ──────────────────────────────────────────────────────
 
 Event = Annotated[
@@ -479,6 +514,10 @@ Event = Annotated[
     | ToolCreationFailed
     | SandboxTimeout
     | SandboxViolation
-    | SandboxResourceExceeded,
+    | SandboxResourceExceeded
+    | ToolDisabled
+    | ToolEnabled
+    | ToolDeleted
+    | ToolUpdated,
     Field(discriminator="event_type"),
 ]

@@ -97,6 +97,43 @@ def create_agent_components(
     # ── 动态工具创建基础设施（v1.1 Phase 8）─────────────────────────
     sandbox = SandboxExecutor()
     tool_persistence = ToolPersistenceManager()
+
+    # ── 启动时自动加载持久化动态工具（DYN-22）──────────────────────
+    for loader_name, loader_fn in [
+        ("sandbox", tool_persistence.load_sandbox_tools),
+        ("project", tool_persistence.load_project_tools),
+    ]:
+        for tool_data in loader_fn():
+            meta_dict = tool_data.get("meta", {})
+            tool_id = tool_data["tool_name"]
+            code = tool_data["code"]
+            language = tool_data["language"]
+            persistence_level = tool_data["persistence"]
+            enabled = meta_dict.get("enabled", True)
+
+            tags = ["dynamic", f"lang:{language}", f"persist:{persistence_level}"]
+            if not enabled:
+                tags.append("disabled")
+
+            from loopai.tools.types import ToolMetadata, PermissionLevel
+
+            meta = ToolMetadata(
+                name=tool_id,
+                description=meta_dict.get("description", ""),
+                permission_level=PermissionLevel.MODERATE,
+                timeout=30.0,
+                param_schema=meta_dict.get("param_schema", {}),
+                func_ref=DynamicToolCreator.build_func_ref(code, language),
+                is_dynamic=True,
+                enabled=enabled,
+                tags=tags,
+                code=code,
+            )
+            try:
+                registry.register_meta(meta, is_dynamic=True)
+            except ValueError:
+                pass  # 跳过重复工具
+
     dynamic_creator = DynamicToolCreator(
         registry=registry,
         bus=bus,

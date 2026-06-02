@@ -241,6 +241,7 @@ export interface ToolCreationRequestedEvent extends EventBase {
   risk_flags: RiskFlag[];
   test_code: string;
   param_schema: Record<string, unknown>;
+  is_update: boolean;
 }
 
 export interface ToolCreationConfirmedEvent extends EventBase {
@@ -282,6 +283,31 @@ export interface ToolCreationFailedEvent extends EventBase {
   tool_name: string;
   stage: string;
   error_message: string;
+}
+
+// ── Tool management events (Phase 10) ─────────────────────────────────
+
+export interface ToolDisabledEvent extends EventBase {
+  event_type: "tool_disabled";
+  tool_name: string;
+}
+
+export interface ToolEnabledEvent extends EventBase {
+  event_type: "tool_enabled";
+  tool_name: string;
+}
+
+export interface ToolDeletedEvent extends EventBase {
+  event_type: "tool_deleted";
+  tool_name: string;
+  persistence: string;
+}
+
+export interface ToolUpdatedEvent extends EventBase {
+  event_type: "tool_updated";
+  tool_name: string;
+  tool_id: string;
+  old_tool_name: string;
 }
 
 // ── Sandbox security events (Phase 9) ────────────────────────────────────
@@ -387,7 +413,11 @@ export type Event =
   | ToolCreationFailedEvent
   | SandboxTimeoutEvent
   | SandboxViolationEvent
-  | SandboxResourceExceededEvent;
+  | SandboxResourceExceededEvent
+  | ToolDisabledEvent
+  | ToolEnabledEvent
+  | ToolDeletedEvent
+  | ToolUpdatedEvent;
 
 // ── Human-readable label map ──────────────────────────────────────────
 
@@ -427,4 +457,8 @@ export const EVENT_TYPE_MAP: Record<string, string> = {
   sandbox_timeout: "Sandbox Timeout",
   sandbox_violation: "Sandbox Violation",
   sandbox_resource_exceeded: "Resource Exceeded",
+  tool_disabled: "Tool Disabled",
+  tool_enabled: "Tool Enabled",
+  tool_deleted: "Tool Deleted",
+  tool_updated: "Tool Updated",
 };
