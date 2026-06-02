@@ -360,6 +360,7 @@ async def delete_tool(
                 "event_type": "tool_deleted",
                 "session_id": "system",
                 "tool_name": tool_name,
+                "persistence": persistence,
             },
         )
 
