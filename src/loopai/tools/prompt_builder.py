@@ -56,7 +56,7 @@ def build_system_prompt(registry: ToolRegistry, working_dir: str = ".") -> str:
 
     # 动态工具段落（v1.1 Phase 8）
     dynamic_tools = [
-        m for m in registry.list_all() if m.is_dynamic
+        m for m in registry.list_all() if m.is_dynamic and m.enabled
     ]
     if dynamic_tools:
         lines.append("")
