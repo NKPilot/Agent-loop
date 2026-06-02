@@ -13,7 +13,7 @@ import {
   ChevronDown, ChevronUp, CheckCircle2, XCircle, Clock,
   Loader2, BadgeCheck, AlertTriangle,
 } from "lucide-react";
-import Editor from "@monaco-editor/react";
+import Editor, { DiffEditor } from "@monaco-editor/react";
 import { useUIStore } from "@/stores/uiStore";
 import { confirmToolCreation } from "@/lib/api";
 import {
@@ -172,11 +172,12 @@ function ToolCreationDialog() {
         <DialogHeader>
           <div className="flex items-center gap-2">
             <Hammer className="size-5 text-primary" />
-            <DialogTitle>Tool Creation</DialogTitle>
+            <DialogTitle>{event.is_update ? "Update Tool" : "Tool Creation"}</DialogTitle>
           </div>
           <DialogDescription>
-            The agent has proposed a new dynamic tool. Review the code, risk
-            assessment, and test plan before approving.
+            {event.is_update
+              ? "The agent has proposed an update to an existing tool. Review the code changes before approving."
+              : "The agent has proposed a new dynamic tool. Review the code, risk assessment, and test plan before approving."}
           </DialogDescription>
         </DialogHeader>
 
@@ -197,35 +198,62 @@ function ToolCreationDialog() {
 
             <Separator />
 
-            {/* ── Zone 2: Source Code ────────────────────────────────────── */}
+            {/* ── Zone 2: Source Code — Editor or DiffEditor (D-09, D-10) ──── */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Code2 className="size-4 text-muted-foreground" />
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Source Code
+                  {event.is_update ? "Code Changes" : "Source Code"}
                 </span>
+                {event.is_update && (
+                  <Badge variant="default" className="bg-amber-600/20 text-amber-600 text-[10px] border-amber-600/30">
+                    Update Mode
+                  </Badge>
+                )}
               </div>
-              <div className="border rounded-md overflow-hidden min-h-[240px] max-h-[480px]">
-                <Editor
-                  height="240px"
-                  language={event.language === "python" ? "python" : "shell"}
-                  value={event.code}
-                  theme="vs-dark"
-                  options={{
-                    readOnly: true,
-                    minimap: { enabled: false },
-                    lineNumbers: "on",
-                    scrollBeyondLastLine: false,
-                    wordWrap: "on",
-                    fontSize: 13,
-                    fontFamily:
-                      "'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace",
-                    padding: { top: 12, bottom: 12 },
-                  }}
-                  loading={
-                    <Skeleton className="h-[240px] w-full rounded-md" />
-                  }
-                />
+              <div className="border rounded-md overflow-hidden min-h-[240px]">
+                {event.is_update ? (
+                  <DiffEditor
+                    original={event.old_code || ""}
+                    modified={event.code}
+                    language={event.language === "python" ? "python" : "shell"}
+                    theme="vs-dark"
+                    height="300px"
+                    options={{
+                      readOnly: true,
+                      minimap: { enabled: false },
+                      lineNumbers: "on",
+                      scrollBeyondLastLine: false,
+                      wordWrap: "on",
+                      fontSize: 13,
+                      renderSideBySide: true,
+                    }}
+                    loading={
+                      <Skeleton className="h-[300px] w-full rounded-md" />
+                    }
+                  />
+                ) : (
+                  <Editor
+                    height="240px"
+                    language={event.language === "python" ? "python" : "shell"}
+                    value={event.code}
+                    theme="vs-dark"
+                    options={{
+                      readOnly: true,
+                      minimap: { enabled: false },
+                      lineNumbers: "on",
+                      scrollBeyondLastLine: false,
+                      wordWrap: "on",
+                      fontSize: 13,
+                      fontFamily:
+                        "'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace",
+                      padding: { top: 12, bottom: 12 },
+                    }}
+                    loading={
+                      <Skeleton className="h-[240px] w-full rounded-md" />
+                    }
+                  />
+                )}
               </div>
             </div>
 
@@ -314,9 +342,11 @@ function ToolCreationDialog() {
               )}
             </div>
 
+            {/* ── Zone 5: Persistence (D-09: hidden in update mode) ────────── */}
+            {!event.is_update && (
+              <>
             <Separator />
 
-            {/* ── Zone 5: Persistence ────────────────────────────────────── */}
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <HardDrive className="size-4 text-muted-foreground" />
@@ -361,6 +391,8 @@ function ToolCreationDialog() {
                 </div>
               </RadioGroup>
             </div>
+              </>
+            )}
 
             <Separator />
 

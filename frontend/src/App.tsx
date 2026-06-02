@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useMemo, useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { History, Plus, Send, Loader2, ArrowDown } from "lucide-react";
+import { History, Plus, Send, Loader2, ArrowDown, Wrench } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useUIStore } from "@/stores/uiStore";
 import { useEventStore } from "@/stores/eventStore";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import ConnectionStatus from "@/components/ConnectionStatus";
 import ConfirmationDialog from "@/components/ConfirmationDialog";
 import ToolCreationDialog from "@/components/ToolCreationDialog";
+import ToolManagementPanel from "@/components/ToolManagementPanel";
 import SessionList from "@/components/SessionList";
 import StepCard, { type StepGroup, groupEventsByStep } from "@/components/StepCard";
 import type { Event, UserMessageEvent } from "@/lib/eventTypes";
@@ -34,6 +35,8 @@ function App() {
   const messageInput = useUIStore((s) => s.messageInput);
   const setMessageInput = useUIStore((s) => s.setMessageInput);
   const clearPendingConfirmation = useUIStore((s) => s.clearPendingConfirmation);
+  const toolPanelOpen = useUIStore((s) => s.toolPanelOpen);
+  const setToolPanelOpen = useUIStore((s) => s.setToolPanelOpen);
 
   const [isSending, setIsSending] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -372,6 +375,14 @@ function App() {
             >
               <History className="size-4" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setToolPanelOpen(!toolPanelOpen)}
+              title="Tool management"
+            >
+              <Wrench className="size-4" />
+            </Button>
           </div>
           <div className="flex items-center gap-2">
             <ConnectionStatus />
@@ -395,6 +406,9 @@ function App() {
 
         {/* History sidebar overlay */}
         {historySidebar}
+
+        {/* Tool management sidebar overlay */}
+        {toolPanelOpen && <ToolManagementPanel />}
 
         {/* Confirmation dialog (portal -- renders to document.body) */}
         <ConfirmationDialog />

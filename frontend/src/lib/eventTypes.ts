@@ -242,6 +242,7 @@ export interface ToolCreationRequestedEvent extends EventBase {
   test_code: string;
   param_schema: Record<string, unknown>;
   is_update: boolean;
+  old_code?: string;
 }
 
 export interface ToolCreationConfirmedEvent extends EventBase {
