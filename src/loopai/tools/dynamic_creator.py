@@ -35,7 +35,7 @@ from loopai.tools.sandbox import DangerousModuleScanner, SandboxExecutor
 from loopai.tools.tool_persistence import ToolPersistenceManager
 from loopai.tools.types import PermissionLevel, ToolMetadata, ToolResult
 
-__all__ = ["DynamicToolCreator", "create_generate_tool_fn"]
+__all__ = ["DynamicToolCreator", "create_generate_tool_fn", "create_list_tools_fn"]
 
 
 class DynamicToolCreator:
@@ -122,6 +122,11 @@ class DynamicToolCreator:
 
         tool_id = f"dynamic.{hashlib.sha256(code.encode()).hexdigest()[:8]}_{name}"
 
+        # D-08/DYN-17: 检测是否为已有工具的更新版本
+        existing_meta = self._registry.get(tool_id)
+        is_update = existing_meta is not None
+        old_code = existing_meta.code if existing_meta else ""
+
         # ── Stage 1: 语法检查 ──
         stage1_result = await self._stage1_syntax_check(code, language)
         if stage1_result is not None:
@@ -140,6 +145,8 @@ class DynamicToolCreator:
             language=language,
             param_schema=param_schema,
             risk_flags=risk_flags,
+            is_update=is_update,
+            old_code=old_code,
         )
         if persistence_level is None:
             # 用户拒绝
@@ -170,6 +177,7 @@ class DynamicToolCreator:
             param_schema=param_schema,
             persistence_level=persistence_level,
             config=config,
+            is_update=is_update,
         )
 
         duration_ms = (datetime.now(timezone.utc) - overall_start).total_seconds() * 1000
@@ -344,11 +352,14 @@ class DynamicToolCreator:
         language: str,
         param_schema: dict,
         risk_flags: list[dict],
+        is_update: bool = False,
+        old_code: str = "",
     ) -> tuple[str | None, list[str], dict | None]:
         """Stage 3: 用户确认（EventBus 暂停，无超时）。
 
         通过 EventBus 发布 tool_creation_requested 事件，然后
         使用 asyncio.Event 阻塞等待用户通过 API 端点响应。
+        当检测到已有工具的更新时，事件 payload 包含 is_update 和 old_code 字段。
 
         Args:
             name: 工具名称。
@@ -359,6 +370,8 @@ class DynamicToolCreator:
             language: 代码语言。
             param_schema: 参数 JSON Schema。
             risk_flags: Stage 2 的风险扫描结果。
+            is_update: 是否为已有工具的更新版本。
+            old_code: 已有工具的旧源代码（更新时）。
 
         Returns:
             (persistence_level, extra_dirs, config) 元组。
@@ -382,6 +395,8 @@ class DynamicToolCreator:
             "risk_flags": risk_flags,
             "test_code": test_code,
             "param_schema": param_schema,
+            "is_update": is_update,
+            "old_code": old_code,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -510,11 +525,15 @@ class DynamicToolCreator:
         param_schema: dict,
         persistence_level: str,
         config: dict | None,
+        is_update: bool = False,
     ) -> ToolResult | None:
         """Stage 5+6: 持久化并注册动态工具。
 
         D-06: 确认后立即注册到内存（register_meta is_dynamic=True），
         沙箱级/项目级在注册后写文件。
+
+        当 is_update=True 时，更新现有工具的代码/描述/param_schema，
+        不修改持久化级别（per D-09/T-10-06）。
 
         Returns:
             ToolResult.error 若注册失败（如名称冲突），None 表示成功。
@@ -542,10 +561,20 @@ class DynamicToolCreator:
         )
 
         # 注册到内存（D-06: 确认后立即注册）
-        try:
-            self._registry.register_meta(meta, is_dynamic=True)
-        except ValueError as e:
-            return ToolResult.error(f"工具注册失败: {e}", 0)
+        if is_update:
+            # D-08/DYN-17: 更新已有工具——原地更新，不重新注册
+            existing = self._registry.get(tool_id)
+            if existing:
+                existing.code = code
+                existing.description = description
+                existing.param_schema = param_schema
+                existing.func_ref = self._make_func_ref(tool_id, code, language, config)
+                # 不修改 tags（保留持久化级别等信息 per D-09/T-10-06）
+        else:
+            try:
+                self._registry.register_meta(meta, is_dynamic=True)
+            except ValueError as e:
+                return ToolResult.error(f"工具注册失败: {e}", 0)
 
         # 持久化（D-06: 沙箱/项目级写文件）
         if persistence_level != "session":
@@ -562,14 +591,16 @@ class DynamicToolCreator:
                 # 持久化失败不阻塞——工具已注册到内存
                 pass
 
-        # 发布 tool_created 事件
-        await self._bus.publish("tool_created", {
-            "event_type": "tool_created",
+        # 发布工具创建或更新事件
+        event_name = "tool_updated" if is_update else "tool_created"
+        await self._bus.publish(event_name, {
+            "event_type": event_name,
             "session_id": self._session_id,
             "step_num": 0,
             "tool_name": name,
             "tool_id": tool_id,
             "persistence": persistence_level,
+            "is_update": is_update,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -717,3 +748,55 @@ def create_generate_tool_fn(creator: DynamicToolCreator) -> Callable:
     )(_generate_tool_impl)
 
     return generate_tool_fn
+
+
+def create_list_tools_fn(registry: ToolRegistry) -> Callable:
+    """创建 list_tools 内置工具工厂。
+
+    返回的 callable 将被注册到 ToolRegistry，Agent 可通过 ToolExecutor
+    调用它查询所有已注册动态工具的详细信息（含源代码和参数 Schema）。
+
+    决策引用:
+        DYN-23: Agent 可通过 list_tools 内置工具查询动态工具详细信息
+
+    Args:
+        registry: 工具注册表实例，用于查询动态工具列表。
+
+    Returns:
+        @tool 装饰后的 async 函数，带有 __tool_meta__ 属性。
+    """
+
+    async def _list_tools_impl(detail: bool = False) -> str:
+        """列出所有可用动态工具及其详细信息。
+
+        Args:
+            detail: 若为 True，返回包含源代码和权限级别的完整信息。
+
+        Returns:
+            JSON 字符串格式的工具列表。
+        """
+        tools = registry.list_dynamic()
+        result = []
+        for meta in tools:
+            info = {
+                "name": meta.name,
+                "description": meta.description,
+                "enabled": meta.enabled,
+                "tags": meta.tags,
+                "param_schema": meta.param_schema,
+            }
+            if detail:
+                info["code"] = meta.code
+                info["permission_level"] = meta.permission_level.value
+            result.append(info)
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    list_tools_fn = tool(
+        name="list_tools",
+        description="列出所有已注册的动态工具及其详细信息。使用 detail=true 获取完整信息（含参数 Schema 和源代码）。",
+        permission_level=PermissionLevel.SAFE,
+        timeout=10.0,
+        tags=["dynamic", "meta"],
+    )(_list_tools_impl)
+
+    return list_tools_fn
