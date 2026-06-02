@@ -150,3 +150,53 @@ export async function deleteSession(id: string): Promise<void> {
 export function exportSessionUrl(id: string): string {
   return `/api/sessions/${encodeURIComponent(id)}/export`;
 }
+
+// ── Tool management API (Phase 10) ──────────────────────────────────
+
+export interface ToolSummary {
+  tool_name: string;
+  description: string;
+  language: string;
+  persistence: string;
+  enabled: boolean;
+  is_dynamic: boolean;
+}
+
+export interface ToolDetail {
+  tool_name: string;
+  description: string;
+  language: string;
+  code: string;
+  param_schema: Record<string, unknown>;
+  persistence: string;
+  enabled: boolean;
+  tags: string[];
+  created_at?: string;
+}
+
+export async function fetchTools(): Promise<ToolSummary[]> {
+  const response = await fetch("/api/tools/");
+  const data = await handleResponse<{ tools: ToolSummary[] }>(response);
+  return data.tools;
+}
+
+export async function fetchToolDetail(toolName: string): Promise<ToolDetail> {
+  const response = await fetch(`/api/tools/${encodeURIComponent(toolName)}`);
+  return handleResponse<ToolDetail>(response);
+}
+
+export async function disableTool(toolName: string): Promise<void> {
+  await fetch(`/api/tools/${encodeURIComponent(toolName)}/disable`, { method: "POST" });
+}
+
+export async function enableTool(toolName: string): Promise<void> {
+  await fetch(`/api/tools/${encodeURIComponent(toolName)}/enable`, { method: "POST" });
+}
+
+export async function deleteTool(toolName: string): Promise<void> {
+  await fetch(`/api/tools/${encodeURIComponent(toolName)}/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmation: true }),
+  });
+}

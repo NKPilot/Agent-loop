@@ -31,6 +31,7 @@ export interface UIState {
   sseRetryCount: number;
   messageInput: string;
   pendingSessionStart: boolean;
+  toolPanelOpen: boolean;
 
   setActiveSession: (id: string | null) => void;
   selectToolCall: (id: string | null) => void;
@@ -46,7 +47,7 @@ export interface UIState {
   setSSERetryCount: (count: number) => void;
   setMessageInput: (text: string) => void;
   setPendingSessionStart: (v: boolean) => void;
-}
+  setToolPanelOpen: (open: boolean) => void;
 
 // ── Store ─────────────────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ export const useUIStore = create<UIState>()((set) => ({
   sseRetryCount: 0,
   messageInput: "",
   pendingSessionStart: false,
+  toolPanelOpen: false,
 
   setActiveSession: (id: string | null) =>
     set({ activeSessionId: id, selectedToolCallId: null }),
@@ -111,4 +113,7 @@ export const useUIStore = create<UIState>()((set) => ({
 
   setPendingSessionStart: (v: boolean) =>
     set({ pendingSessionStart: v }),
+
+  setToolPanelOpen: (open: boolean) =>
+    set({ toolPanelOpen: open }),
 }));
