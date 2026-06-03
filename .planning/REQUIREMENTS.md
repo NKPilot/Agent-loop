@@ -9,6 +9,7 @@
 
 ### Agent 核心循环
 
+- [ ] **CORE-00**: 跑通完整 Agent 执行闭环：用户目标 → ReActFSM → LLM 决策 → 工具调用 → 观察结果 → 下一步 → 终止/追问 → CLI/JSONL/Web 前端可见
 - [ ] **CORE-01**: 实现 ReAct 状态机（REASON → ACT → OBSERVE → FINISH → ERROR），而非简单的 while 循环
 - [ ] **CORE-02**: 通过 OpenAI 兼容 API 调用 LLM（可配置 base_url、api_key、model）
 - [ ] **CORE-03**: 流式输出 agent 每步的思考、调用和观察结果（async generator/SSE）
